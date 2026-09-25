@@ -10,6 +10,11 @@ DiskTree is an Android storage analyzer for finding large files and folders. It 
 - Sort folders and files by size.
 - Expand and collapse folders in a virtualized list.
 - Switch between logical file size, which matches file managers, and allocated disk usage.
+- Search names inside the scanned tree, with ancestors kept in view.
+- Sort by size, name, or path, and switch to a flat list of the largest files.
+- See space suggestions derived from the scan, such as files over 500 MB, the largest top-level folder, cache folders, and installed app packages.
+- Copy the selected path to the clipboard and open a selected file in its app.
+- Export the result as a CSV report in Downloads.
 - Work with light and dark system themes.
 - Keep scan data on the device. The app has no network permission and does not upload file names or paths.
 
@@ -37,7 +42,20 @@ The workflow at `.github/workflows/build.yml` runs on pushes and pull requests. 
 testDebugUnitTest lintDebug assembleDebug assembleRelease
 ```
 
-After a successful run, download the `DiskTree-APKs` artifact from the Actions run. It contains the debug APK and the unsigned release APK.
+After a successful run, download the `DiskTree-APKs` artifact from the Actions run. It contains the debug APK and the release APK.
+
+## Release signing
+
+The release APK is signed in CI when these repository secrets are set:
+
+| Secret | Value |
+| --- | --- |
+| `DISKTREE_KEYSTORE_BASE64` | Base64 of a PKCS12 keystore |
+| `DISKTREE_STORE_PASSWORD` | Keystore password |
+| `DISKTREE_KEY_ALIAS` | Key alias |
+| `DISKTREE_KEY_PASSWORD` | Key password |
+
+Without them the build still succeeds and the release APK stays unsigned. For a local signed build, export `DISKTREE_STORE_FILE`, `DISKTREE_STORE_PASSWORD`, `DISKTREE_KEY_ALIAS`, and `DISKTREE_KEY_PASSWORD` before running Gradle. Keystores are ignored by git through `*.p12`, `*.jks`, and `keystore.properties`.
 
 ## Build locally
 
