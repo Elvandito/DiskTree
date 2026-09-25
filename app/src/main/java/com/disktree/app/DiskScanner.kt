@@ -13,7 +13,15 @@ internal data class RawEntry(
     val sizeBytes: Long,
 )
 
-internal class TreeBuilder(private val rootPath: String) {
+enum class SizeMode {
+    LOGICAL,
+    ALLOCATED,
+}
+
+internal class TreeBuilder(
+    private val rootPath: String,
+    private val compactSizeIncludesChildren: Boolean = false,
+) {
     private data class MutableNode(
         val path: String,
         var isDirectory: Boolean,
@@ -33,7 +41,7 @@ internal class TreeBuilder(private val rootPath: String) {
 
     fun accept(line: String): RawEntry? {
         val fields = line.split('\t', limit = 4)
-        return if (fields.size == 4 && fields[0].length == 1) acceptFind(fields) else acceptDu(line)
+        return if (fields.size == 4 && fields[0].length == 1) acceptFind(fields) else acceptCompact(line)
     }
 
     private fun acceptFind(fields: List<String>): RawEntry? {
@@ -51,7 +59,7 @@ internal class TreeBuilder(private val rootPath: String) {
         return RawEntry(path, isDirectory, sizeBytes)
     }
 
-    private fun acceptDu(line: String): RawEntry? {
+    private fun acceptCompact(line: String): RawEntry? {
         val delimiter = line.indexOfFirst { it == '\t' || it == ' ' }
         if (delimiter <= 0) return null
 
@@ -60,7 +68,7 @@ internal class TreeBuilder(private val rootPath: String) {
         if (!isWithinRoot(path)) return null
 
         val isDirectory = path == rootPath
-        nodes[path] = MutableNode(path, isDirectory, sizeBytes, true)
+        nodes[path] = MutableNode(path, isDirectory, sizeBytes, compactSizeIncludesChildren)
         return RawEntry(path, isDirectory, sizeBytes)
     }
 
@@ -170,11 +178,12 @@ internal class DiskScanner {
     suspend fun scan(
         useRoot: Boolean,
         sharedStoragePath: String,
+        sizeMode: SizeMode,
         onProgress: (ScanProgress) -> Unit,
     ): ScanResult = withContext(Dispatchers.IO) {
         val rootPath = if (useRoot) "/data" else sharedStoragePath
-        val tree = TreeBuilder(rootPath)
-        val process = startProcess(useRoot, sharedStoragePath)
+        val tree = TreeBuilder(rootPath, sizeMode == SizeMode.ALLOCATED)
+        val process = startProcess(useRoot, sharedStoragePath, sizeMode)
         activeProcess = process
 
         var entryCount = 0L
@@ -237,7 +246,19 @@ internal class DiskScanner {
         activeProcess?.destroy()
     }
 
-    private fun startProcess(useRoot: Boolean, sharedStoragePath: String): Process {
+    private fun startProcess(
+        useRoot: Boolean,
+        sharedStoragePath: String,
+        sizeMode: SizeMode,
+    ): Process {
+        return if (sizeMode == SizeMode.ALLOCATED) {
+            startAllocatedScan(useRoot, sharedStoragePath)
+        } else {
+            startLogicalScan(useRoot, sharedStoragePath)
+        }
+    }
+
+    private fun startAllocatedScan(useRoot: Boolean, sharedStoragePath: String): Process {
         return if (useRoot) {
             ProcessBuilder(
                 "su",
@@ -249,6 +270,24 @@ internal class DiskScanner {
                 "/system/bin/du",
                 "-a",
                 "-k",
+                sharedStoragePath,
+            ).redirectErrorStream(true).start()
+        }
+    }
+
+    private fun startLogicalScan(useRoot: Boolean, sharedStoragePath: String): Process {
+        val format = "%s\\t%p\\n"
+        return if (useRoot) {
+            ProcessBuilder(
+                "su",
+                "-c",
+                "exec /system/bin/find /data -printf '$format'",
+            ).redirectErrorStream(true).start()
+        } else {
+            ProcessBuilder(
+                "/system/bin/find",
+                "-printf",
+                format,
                 sharedStoragePath,
             ).redirectErrorStream(true).start()
         }

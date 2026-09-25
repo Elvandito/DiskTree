@@ -31,7 +31,7 @@ class DiskTreeTest {
 
     @Test
     fun buildsTreeFromDuOutput() {
-        val builder = TreeBuilder("/data")
+        val builder = TreeBuilder("/data", compactSizeIncludesChildren = true)
 
         assertNotNull(builder.accept("12288 /data"))
         builder.accept("12288 /data/app")
@@ -42,6 +42,20 @@ class DiskTreeTest {
         assertEquals(12_288L, root.sizeBytes)
         assertTrue(root.children.single().isDirectory)
         assertEquals("base.apk", root.children.single().children.single().name)
+    }
+
+    @Test
+    fun buildsTreeFromLogicalCompactOutput() {
+        val builder = TreeBuilder("/data")
+
+        builder.accept("1024 /data")
+        builder.accept("2048 /data/app")
+        builder.accept("4096 /data/app/base.apk")
+
+        val root = builder.build()
+
+        assertEquals(7_168L, root.sizeBytes)
+        assertEquals(6_144L, root.children.single().sizeBytes)
     }
 
     @Test

@@ -64,6 +64,7 @@ fun DiskTreeScreen(
     state: DiskTreeUiState,
     hasStorageAccess: Boolean,
     onSelectScope: (ScanScope) -> Unit,
+    onSelectSizeMode: (SizeMode) -> Unit,
     onScan: () -> Unit,
     onCancelScan: () -> Unit,
     onSelectNode: (ScanNode) -> Unit,
@@ -86,6 +87,7 @@ fun DiskTreeScreen(
             ScanActionBar(
                 scope = state.scope,
                 phase = state.phase,
+                sizeMode = state.sizeMode,
                 rootAccess = state.rootAccess,
                 hasStorageAccess = hasStorageAccess,
                 onScan = onScan,
@@ -111,6 +113,11 @@ fun DiskTreeScreen(
                     enabled = !scanning,
                     onSelect = onSelectScope,
                 )
+                SizeModeSelector(
+                    selected = state.sizeMode,
+                    enabled = !scanning,
+                    onSelect = onSelectSizeMode,
+                )
                 StorageSummary(state.capacity)
 
                 when {
@@ -131,6 +138,7 @@ fun DiskTreeScreen(
 
                     state.phase == ScanPhase.Complete && state.root != null -> ResultTree(
                         modifier = Modifier.weight(1f),
+                        sizeMode = state.sizeMode,
                         root = state.root,
                         expandedPaths = state.expandedPaths,
                         selectedPath = state.selectedPath,
@@ -172,6 +180,48 @@ private fun ScopeSelector(
             enabled = enabled,
             label = { Text("Root device") },
             leadingIcon = { Icon(Icons.Outlined.Shield, contentDescription = null) },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SizeModeSelector(
+    selected: SizeMode,
+    enabled: Boolean,
+    onSelect: (SizeMode) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Text("Size view", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(6.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            FilterChip(
+                selected = selected == SizeMode.LOGICAL,
+                onClick = { onSelect(SizeMode.LOGICAL) },
+                enabled = enabled,
+                label = { Text("File size") },
+                leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null) },
+            )
+            FilterChip(
+                selected = selected == SizeMode.ALLOCATED,
+                onClick = { onSelect(SizeMode.ALLOCATED) },
+                enabled = enabled,
+                label = { Text("Disk usage") },
+                leadingIcon = { Icon(Icons.Outlined.Storage, contentDescription = null) },
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "File size matches file managers. Disk usage shows allocated blocks.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -371,6 +421,7 @@ private fun StatePanel(
 @Composable
 private fun ResultTree(
     modifier: Modifier,
+    sizeMode: SizeMode,
     root: ScanNode,
     expandedPaths: Set<String>,
     selectedPath: String?,
@@ -388,7 +439,10 @@ private fun ResultTree(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Largest first", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = if (sizeMode == SizeMode.LOGICAL) "Largest by file size" else "Largest by disk usage",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Text(
                     text = root.path,
                     style = MaterialTheme.typography.bodySmall,
@@ -534,6 +588,7 @@ private fun StorageTreeRow(
 private fun ScanActionBar(
     scope: ScanScope,
     phase: ScanPhase,
+    sizeMode: SizeMode,
     rootAccess: RootAccess,
     hasStorageAccess: Boolean,
     onScan: () -> Unit,
@@ -574,7 +629,8 @@ private fun ScanActionBar(
                     needsPermission -> "Grant file access"
                     complete -> "Scan again"
                     scope == ScanScope.ROOT_DEVICE -> "Scan with root"
-                    else -> "Scan shared storage"
+                    sizeMode == SizeMode.LOGICAL -> "Scan file sizes"
+                    else -> "Scan disk usage"
                 }
                 val icon = when {
                     needsRootCheck -> Icons.Outlined.Shield

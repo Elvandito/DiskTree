@@ -55,6 +55,7 @@ data class StorageCapacity(
 
 data class DiskTreeUiState(
     val scope: ScanScope = ScanScope.SHARED_STORAGE,
+    val sizeMode: SizeMode = SizeMode.LOGICAL,
     val phase: ScanPhase = ScanPhase.Idle,
     val progress: ScanProgress = ScanProgress(),
     val root: ScanNode? = null,
@@ -125,6 +126,21 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
         if (scope == ScanScope.ROOT_DEVICE) checkRootAccess()
     }
 
+    fun selectSizeMode(sizeMode: SizeMode) {
+        if (_state.value.phase == ScanPhase.Scanning || _state.value.sizeMode == sizeMode) return
+        _state.update {
+            it.copy(
+                sizeMode = sizeMode,
+                phase = ScanPhase.Idle,
+                progress = ScanProgress(),
+                root = null,
+                expandedPaths = emptySet(),
+                selectedPath = null,
+                warning = null,
+            )
+        }
+    }
+
     fun checkRootAccess() {
         val current = _state.value
         if (
@@ -161,6 +177,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
             checkRootAccess()
             return
         }
+        val sizeMode = _state.value.sizeMode
 
         scanJob = viewModelScope.launch {
             _state.update {
@@ -177,6 +194,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
                 val result = scanner.scan(
                     useRoot = scope == ScanScope.ROOT_DEVICE,
                     sharedStoragePath = sharedStoragePath,
+                    sizeMode = sizeMode,
                 ) { progress ->
                     _state.update { it.copy(progress = progress) }
                 }

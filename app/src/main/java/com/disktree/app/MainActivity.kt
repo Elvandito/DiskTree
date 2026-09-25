@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
                     state = state,
                     hasStorageAccess = hasStorageAccess,
                     onSelectScope = viewModel::selectScope,
+                    onSelectSizeMode = viewModel::selectSizeMode,
                     onScan = { viewModel.scan(hasStorageAccess) },
                     onCancelScan = viewModel::cancelScan,
                     onSelectNode = viewModel::selectNode,
