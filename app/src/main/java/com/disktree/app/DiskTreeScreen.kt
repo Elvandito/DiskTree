@@ -870,7 +870,13 @@ private fun SearchField(
         modifier = modifier.fillMaxWidth(),
         singleLine = true,
         textStyle = MaterialTheme.typography.bodyMedium,
-        placeholder = { Text("Search names", style = MaterialTheme.typography.bodyMedium) },
+        placeholder = {
+            Text(
+                text = "Search names",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
         trailingIcon = {
             if (query.isNotEmpty()) {
