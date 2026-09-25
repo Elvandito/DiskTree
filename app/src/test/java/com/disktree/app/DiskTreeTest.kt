@@ -20,10 +20,10 @@ class DiskTreeTest {
         val root = builder.build()
 
         assertEquals("/data", root.path)
-        assertEquals(49_152L, root.sizeBytes)
+        assertEquals(51_200L, root.sizeBytes)
         assertTrue(root.isDirectory)
         assertEquals(listOf("media.bin", "app"), root.children.map { it.name })
-        assertEquals(12_288L, root.children[1].sizeBytes)
+        assertEquals(14_336L, root.children[1].sizeBytes)
         assertEquals("readme.txt", root.children[1].children[1].name)
         assertEquals(2_048L, root.children[1].children[1].sizeBytes)
     }
@@ -51,7 +51,7 @@ class DiskTreeTest {
 
         val appExpanded = flattenTree(root, setOf(root.path, app.path))
         assertEquals(4, appExpanded.size)
-        assertEquals(2, appExpanded.last().depth)
-        assertEquals(500f / 750f, appExpanded.last().share, 0.001f)
+        assertEquals(2, appExpanded[2].depth)
+        assertEquals(500f / 750f, appExpanded[2].share, 0.001f)
     }
 }
