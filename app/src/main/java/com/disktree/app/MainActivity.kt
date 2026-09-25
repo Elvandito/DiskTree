@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
                     onSelectNode = viewModel::selectNode,
                     onRequestStorageAccess = ::requestStorageAccess,
                     onCheckRootAccess = viewModel::checkRootAccess,
+                    onRenameSelected = viewModel::renameSelected,
+                    onDeleteSelected = viewModel::deleteSelected,
                 )
             }
         }
