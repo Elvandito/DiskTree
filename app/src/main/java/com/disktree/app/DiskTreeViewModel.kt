@@ -266,8 +266,8 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun cancelScan() {
-        scanner.cancel()
         scanJob?.cancel()
+        scanner.cancel()
     }
 
     fun selectNode(node: ScanNode) {
@@ -295,7 +295,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
         val current = _state.value
         val node = current.selectedNode ?: return
         if (current.fileAction == FileActionPhase.Working) return
-        if (!validName(newName)) {
+        if (!validFileName(newName)) {
             setActionError("Enter a valid file or folder name.")
             return
         }
@@ -329,7 +329,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
                     runRootCommand(
                         "/system/bin/mv ${shellQuote(node.path)} ${shellQuote(target.path)}",
                     )
-                } else if (!oldFile.renameTo(target)) {
+                } else if (!withContext(Dispatchers.IO) { oldFile.renameTo(target) }) {
                     throw IOException("The item could not be renamed.")
                 }
                 _state.update {
@@ -366,7 +366,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
             try {
                 if (current.scope == ScanScope.ROOT_DEVICE) {
                     runRootCommand("/system/bin/rm -rf ${shellQuote(node.path)}")
-                } else if (!File(node.path).deleteRecursively()) {
+                } else if (!withContext(Dispatchers.IO) { File(node.path).deleteRecursively() }) {
                     throw IOException("The item could not be deleted.")
                 }
                 _state.update {
@@ -396,15 +396,6 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(fileAction = FileActionPhase.Failed(message.take(180))) }
     }
 
-    private fun validName(name: String): Boolean {
-        return name.isNotBlank() &&
-            '/' !in name &&
-            '\u0000' !in name &&
-            name != "." &&
-            name != ".." &&
-            name.toByteArray().size <= 255
-    }
-
     private fun safePath(path: String, rootPath: String?): Boolean {
         if (rootPath == null) return false
         val canonicalPath = runCatching { File(path).canonicalPath }.getOrNull() ?: return false
@@ -422,7 +413,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
         val output = runRootCommand(
             "if [ -e ${shellQuote(path)} ] || [ -L ${shellQuote(path)} ]; then printf 1; else printf 0; fi",
         )
-        return output.trim() == "1"
+        return output.lineSequence().any { it.trim() == "1" }
     }
 
     private suspend fun runRootCommand(command: String): String = withContext(Dispatchers.IO) {

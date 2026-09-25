@@ -16,13 +16,13 @@ DiskTree is an Android storage analyzer for finding large files and folders. It 
 
 ### Shared storage
 
-Shared storage is the device's external storage directory. On Android 11 and newer, DiskTree requests the special all-files access permission. Older Android versions use `READ_EXTERNAL_STORAGE`.
+Shared storage is the device's external storage directory. On Android 11 and newer, DiskTree requests the special all-files access permission. Older Android versions use `READ_EXTERNAL_STORAGE` for scanning and `WRITE_EXTERNAL_STORAGE` for rename and delete actions.
 
 Android can hide some app-specific folders from standard access. The scan result reports when protected paths were skipped.
 
 ### Root device
 
-Selecting Root device checks `su` access first by running `id -u` through the root manager. After access is confirmed, DiskTree runs a local size scan as root and scans `/data`, the Android user-data partition. File size uses logical byte sizes, while Disk usage uses `du -a -k`. The root manager may display a permission prompt when the check or scan starts. DiskTree does not delete or modify files.
+Selecting Root device checks `su` access first by running `id -u` through the root manager. After access is confirmed, DiskTree runs a local size scan as root and scans `/data`, the Android user-data partition. File size uses logical byte sizes, while Disk usage uses `du -a -k` with kilobyte results converted to bytes. The root manager may display a permission prompt when the check or scan starts.
 
 ## Size views
 

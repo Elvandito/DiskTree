@@ -407,7 +407,11 @@ private fun ScanningState(modifier: Modifier, progress: ScanProgress, scope: Sca
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "${formatInteger(progress.entryCount)} entries, ${formatBytes(progress.scannedBytes)}",
+            text = if (progress.scannedBytes > 0L) {
+                "${formatInteger(progress.entryCount)} entries, ${formatBytes(progress.scannedBytes)}"
+            } else {
+                "${formatInteger(progress.entryCount)} entries"
+            },
             style = MaterialTheme.typography.titleMedium,
         )
         if (progress.currentPath.isNotEmpty()) {
@@ -827,7 +831,12 @@ private fun DeleteDialog(
             onDismissRequest = onDismiss,
             title = { Text("Delete $kind?") },
             text = {
-                Text("Continue to the final confirmation before deleting this $kind.")
+                Column {
+                    Text("This will delete this $kind:")
+                    Text(node.name, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Continue to the final confirmation to proceed.")
+                }
             },
             confirmButton = {
                 Button(onClick = onContinue) {
@@ -922,7 +931,7 @@ private fun ScanActionBar(
     }
 }
 
-private fun validFileName(name: String): Boolean {
+internal fun validFileName(name: String): Boolean {
     return name.isNotBlank() &&
         '/' !in name &&
         '\u0000' !in name &&

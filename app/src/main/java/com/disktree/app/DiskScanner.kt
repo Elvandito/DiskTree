@@ -15,7 +15,7 @@ internal data class RawEntry(
 
 internal class TreeBuilder(
     private val rootPath: String,
-    private val compactSizeIncludesChildren: Boolean = false,
+    private val sizeMode: SizeMode = SizeMode.LOGICAL,
 ) {
     private data class MutableNode(
         val path: String,
@@ -35,35 +35,17 @@ internal class TreeBuilder(
     )
 
     fun accept(line: String): RawEntry? {
-        val fields = line.split('\t', limit = 4)
-        return if (fields.size == 4 && fields[0].length == 1) acceptFind(fields) else acceptCompact(line)
-    }
-
-    private fun acceptFind(fields: List<String>): RawEntry? {
-        if (fields[0].length != 1) return null
-
-        val allocatedBlocks = fields[1].toLongOrNull()?.coerceAtLeast(0L) ?: return null
-        val logicalSize = fields[2].toLongOrNull()?.coerceAtLeast(0L) ?: return null
-        val sizeBytes = (allocatedBlocks * 512L).takeIf { it > 0L } ?: logicalSize
-        val path = normalize(fields[3])
-        if (!isWithinRoot(path)) return null
-
-        val isDirectory = fields[0] == "d"
-        if (path == rootPath && !isDirectory) return null
-        nodes[path] = MutableNode(path, isDirectory, sizeBytes, false)
-        return RawEntry(path, isDirectory, sizeBytes)
-    }
-
-    private fun acceptCompact(line: String): RawEntry? {
         val delimiter = line.indexOfFirst { it == '\t' || it == ' ' }
         if (delimiter <= 0) return null
 
-        val sizeBytes = line.substring(0, delimiter).toLongOrNull()?.coerceAtLeast(0L) ?: return null
+        val rawSize = line.substring(0, delimiter).toLongOrNull()?.coerceAtLeast(0L) ?: return null
         val path = normalize(line.substring(delimiter + 1).trimStart(' '))
         if (!isWithinRoot(path)) return null
 
+        val reportedSizeIncludesChildren = sizeMode == SizeMode.ALLOCATED
+        val sizeBytes = if (reportedSizeIncludesChildren) rawSize * 1024L else rawSize
         val isDirectory = path == rootPath
-        nodes[path] = MutableNode(path, isDirectory, sizeBytes, compactSizeIncludesChildren)
+        nodes[path] = MutableNode(path, isDirectory, sizeBytes, reportedSizeIncludesChildren)
         return RawEntry(path, isDirectory, sizeBytes)
     }
 
@@ -177,7 +159,7 @@ internal class DiskScanner {
         onProgress: (ScanProgress) -> Unit,
     ): ScanResult = withContext(Dispatchers.IO) {
         val rootPath = if (useRoot) "/data" else sharedStoragePath
-        val tree = TreeBuilder(rootPath, sizeMode == SizeMode.ALLOCATED)
+        val tree = TreeBuilder(rootPath, sizeMode)
         val process = startProcess(useRoot, sharedStoragePath, sizeMode)
         activeProcess = process
 
@@ -199,7 +181,9 @@ internal class DiskScanner {
                     }
 
                     entryCount++
-                    scannedBytes += entry.sizeBytes
+                    if (sizeMode == SizeMode.LOGICAL) {
+                        scannedBytes += entry.sizeBytes
+                    }
                     if (entryCount % 128L == 0L) {
                         onProgress(ScanProgress(entry.path, entryCount, scannedBytes))
                     }
@@ -281,9 +265,9 @@ internal class DiskScanner {
         } else {
             ProcessBuilder(
                 "/system/bin/find",
+                sharedStoragePath,
                 "-printf",
                 format,
-                sharedStoragePath,
             ).redirectErrorStream(true).start()
         }
     }

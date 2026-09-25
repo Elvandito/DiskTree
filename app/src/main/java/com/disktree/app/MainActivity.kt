@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
     private var hasStorageAccess by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
+        ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         hasStorageAccess = storageAccessGranted()
     }
@@ -79,7 +79,12 @@ class MainActivity : ComponentActivity() {
             }
 
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
-                permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                permissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    ),
+                )
             }
         }
     }
