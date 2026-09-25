@@ -84,7 +84,7 @@ internal class TreeBuilder(private val rootPath: String) {
     }
 }
 
-internal data class ScanProgress(
+data class ScanProgress(
     val currentPath: String = "",
     val entryCount: Long = 0L,
     val scannedBytes: Long = 0L,
