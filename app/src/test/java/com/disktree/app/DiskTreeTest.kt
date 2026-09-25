@@ -1,7 +1,7 @@
 package com.disktree.app
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,7 +11,7 @@ class DiskTreeTest {
     fun buildsSortedTreeFromFindOutput() {
         val builder = TreeBuilder("/data")
 
-        assertFalse(builder.accept("d\t8\t4096\t/data").isNull())
+        assertNotNull(builder.accept("d\t8\t4096\t/data"))
         builder.accept("d\t8\t4096\t/data/app")
         builder.accept("f\t16\t1024\t/data/app/base.apk")
         builder.accept("f\t0\t2048\t/data/app/readme.txt")
