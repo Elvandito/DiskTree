@@ -4,6 +4,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseStorePath = providers.environmentVariable("DISKTREE_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("DISKTREE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("DISKTREE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("DISKTREE_KEY_PASSWORD").orNull
+val releaseSigningReady = !releaseStorePath.isNullOrBlank() &&
+    file(releaseStorePath).exists() &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.disktree.app"
     compileSdk = 35
@@ -31,6 +41,23 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = file(releaseStorePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = if (releaseSigningReady) signingConfigs.getByName("release") else null
+        }
     }
 
     lint {
