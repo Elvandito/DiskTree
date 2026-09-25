@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
                     onCancelScan = viewModel::cancelScan,
                     onSelectNode = viewModel::selectNode,
                     onRequestStorageAccess = ::requestStorageAccess,
+                    onCheckRootAccess = viewModel::checkRootAccess,
                 )
             }
         }

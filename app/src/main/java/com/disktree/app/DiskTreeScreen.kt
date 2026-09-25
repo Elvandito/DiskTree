@@ -68,6 +68,7 @@ fun DiskTreeScreen(
     onCancelScan: () -> Unit,
     onSelectNode: (ScanNode) -> Unit,
     onRequestStorageAccess: () -> Unit,
+    onCheckRootAccess: () -> Unit,
 ) {
     val scanning = state.phase == ScanPhase.Scanning
     Scaffold(
@@ -85,10 +86,12 @@ fun DiskTreeScreen(
             ScanActionBar(
                 scope = state.scope,
                 phase = state.phase,
+                rootAccess = state.rootAccess,
                 hasStorageAccess = hasStorageAccess,
                 onScan = onScan,
                 onCancelScan = onCancelScan,
                 onRequestStorageAccess = onRequestStorageAccess,
+                onCheckRootAccess = onCheckRootAccess,
             )
         },
     ) { padding ->
@@ -112,6 +115,10 @@ fun DiskTreeScreen(
 
                 when {
                     scanning -> ScanningState(Modifier.weight(1f), state.progress, state.scope)
+                    state.scope == ScanScope.ROOT_DEVICE && state.rootAccess != RootAccess.AVAILABLE -> RootAccessState(
+                        modifier = Modifier.weight(1f),
+                        access = state.rootAccess,
+                    )
                     !hasStorageAccess && state.scope == ScanScope.SHARED_STORAGE -> AccessState(Modifier.weight(1f))
                     state.phase is ScanPhase.Failed -> ErrorState(
                         modifier = Modifier.weight(1f),
@@ -240,6 +247,23 @@ private fun AccessState(modifier: Modifier) {
         title = "File access needed",
         message = "Grant all files access to analyze shared storage. Android 11 and newer may hide some app folders from standard access.",
     )
+}
+
+@Composable
+private fun RootAccessState(modifier: Modifier, access: RootAccess) {
+    val title = when (access) {
+        RootAccess.CHECKING -> "Checking root access"
+        RootAccess.UNAVAILABLE -> "Root access unavailable"
+        RootAccess.UNKNOWN -> "Root access not checked"
+        RootAccess.AVAILABLE -> "Root access available"
+    }
+    val message = when (access) {
+        RootAccess.CHECKING -> "Checking whether the root manager can provide su access."
+        RootAccess.UNAVAILABLE -> "Open your root manager, enable DiskTree, then check again."
+        RootAccess.UNKNOWN -> "Check root access before scanning the device data partition."
+        RootAccess.AVAILABLE -> "Root access is available."
+    }
+    StatePanel(modifier = modifier, title = title, message = message)
 }
 
 @Composable
@@ -510,10 +534,12 @@ private fun StorageTreeRow(
 private fun ScanActionBar(
     scope: ScanScope,
     phase: ScanPhase,
+    rootAccess: RootAccess,
     hasStorageAccess: Boolean,
     onScan: () -> Unit,
     onCancelScan: () -> Unit,
     onRequestStorageAccess: () -> Unit,
+    onCheckRootAccess: () -> Unit,
 ) {
     val scanning = phase == ScanPhase.Scanning
     Surface(
@@ -539,21 +565,32 @@ private fun ScanActionBar(
                 }
             } else {
                 val needsPermission = scope == ScanScope.SHARED_STORAGE && !hasStorageAccess
+                val needsRootCheck = scope == ScanScope.ROOT_DEVICE && rootAccess != RootAccess.AVAILABLE
+                val checkingRoot = scope == ScanScope.ROOT_DEVICE && rootAccess == RootAccess.CHECKING
                 val complete = phase == ScanPhase.Complete
                 val label = when {
+                    checkingRoot -> "Checking root access"
+                    needsRootCheck -> "Check root access"
                     needsPermission -> "Grant file access"
                     complete -> "Scan again"
                     scope == ScanScope.ROOT_DEVICE -> "Scan with root"
                     else -> "Scan shared storage"
                 }
                 val icon = when {
+                    needsRootCheck -> Icons.Outlined.Shield
                     needsPermission -> Icons.Outlined.LockOpen
                     complete -> Icons.Outlined.Refresh
                     scope == ScanScope.ROOT_DEVICE -> Icons.Outlined.Shield
                     else -> Icons.Outlined.Storage
                 }
+                val action = when {
+                    needsRootCheck -> onCheckRootAccess
+                    needsPermission -> onRequestStorageAccess
+                    else -> onScan
+                }
                 Button(
-                    onClick = if (needsPermission) onRequestStorageAccess else onScan,
+                    onClick = action,
+                    enabled = !checkingRoot,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 52.dp),

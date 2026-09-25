@@ -33,6 +33,13 @@ enum class ScanScope {
     ROOT_DEVICE,
 }
 
+enum class RootAccess {
+    UNKNOWN,
+    CHECKING,
+    AVAILABLE,
+    UNAVAILABLE,
+}
+
 sealed interface ScanPhase {
     data object Idle : ScanPhase
     data object Scanning : ScanPhase
@@ -53,6 +60,7 @@ data class DiskTreeUiState(
     val root: ScanNode? = null,
     val expandedPaths: Set<String> = emptySet(),
     val selectedPath: String? = null,
+    val rootAccess: RootAccess = RootAccess.UNKNOWN,
     val capacity: StorageCapacity? = null,
     val warning: String? = null,
 )
@@ -90,9 +98,16 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
     )
     val state: StateFlow<DiskTreeUiState> = _state.asStateFlow()
     private var scanJob: Job? = null
+    private var rootCheckJob: Job? = null
 
     fun selectScope(scope: ScanScope) {
-        if (_state.value.phase == ScanPhase.Scanning || _state.value.scope == scope) return
+        if (_state.value.phase == ScanPhase.Scanning) return
+        if (_state.value.scope == scope) {
+            if (scope == ScanScope.ROOT_DEVICE && _state.value.rootAccess != RootAccess.AVAILABLE) {
+                checkRootAccess()
+            }
+            return
+        }
         val path = if (scope == ScanScope.ROOT_DEVICE) "/data" else sharedStoragePath
         _state.update {
             it.copy(
@@ -102,9 +117,36 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
                 root = null,
                 expandedPaths = emptySet(),
                 selectedPath = null,
+                rootAccess = RootAccess.UNKNOWN,
                 capacity = readCapacity(File(path)),
                 warning = null,
             )
+        }
+        if (scope == ScanScope.ROOT_DEVICE) checkRootAccess()
+    }
+
+    fun checkRootAccess() {
+        val current = _state.value
+        if (
+            current.scope != ScanScope.ROOT_DEVICE ||
+            current.phase == ScanPhase.Scanning ||
+            current.rootAccess == RootAccess.CHECKING
+        ) {
+            return
+        }
+        rootCheckJob?.cancel()
+        _state.update { it.copy(rootAccess = RootAccess.CHECKING) }
+        rootCheckJob = viewModelScope.launch {
+            val available = scanner.isRootAvailable()
+            _state.update { state ->
+                if (state.scope == ScanScope.ROOT_DEVICE) {
+                    state.copy(
+                        rootAccess = if (available) RootAccess.AVAILABLE else RootAccess.UNAVAILABLE,
+                    )
+                } else {
+                    state
+                }
+            }
         }
     }
 
@@ -113,6 +155,10 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
         val scope = _state.value.scope
         if (scope == ScanScope.SHARED_STORAGE && !hasStorageAccess) {
             _state.update { it.copy(phase = ScanPhase.Failed("File access is required before scanning shared storage.")) }
+            return
+        }
+        if (scope == ScanScope.ROOT_DEVICE && _state.value.rootAccess != RootAccess.AVAILABLE) {
+            checkRootAccess()
             return
         }
 
@@ -176,6 +222,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onCleared() {
         scanner.cancel()
+        rootCheckJob?.cancel()
         super.onCleared()
     }
 

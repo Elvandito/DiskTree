@@ -1,6 +1,7 @@
 package com.disktree.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -29,6 +30,21 @@ class DiskTreeTest {
     }
 
     @Test
+    fun buildsTreeFromDuOutput() {
+        val builder = TreeBuilder("/data")
+
+        assertNotNull(builder.accept("12288 /data"))
+        builder.accept("12288 /data/app")
+        builder.accept("8192 /data/app/base.apk")
+
+        val root = builder.build()
+
+        assertEquals(12_288L, root.sizeBytes)
+        assertTrue(root.children.single().isDirectory)
+        assertEquals("base.apk", root.children.single().children.single().name)
+    }
+
+    @Test
     fun rejectsMalformedAndOutsidePaths() {
         val builder = TreeBuilder("/data")
 
@@ -36,6 +52,13 @@ class DiskTreeTest {
         assertNull(builder.accept("f\t1\t/outside"))
         assertNull(builder.accept("f\t1\t1024\t/data"))
         assertNull(builder.accept("f\tbad\t1024\t/data/file"))
+    }
+
+    @Test
+    fun recognizesRootIdOutput() {
+        assertTrue(isRootIdOutput("0\n"))
+        assertFalse(isRootIdOutput("1000\n"))
+        assertFalse(isRootIdOutput("permission denied"))
     }
 
     @Test

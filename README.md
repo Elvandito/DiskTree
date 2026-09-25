@@ -22,7 +22,7 @@ Android can hide some app-specific folders from standard access. The scan result
 
 ### Root device
 
-Root mode runs a local `find` process as root and scans `/data`, the Android user-data partition. The root manager may display a permission prompt when the scan starts. DiskTree does not delete or modify files.
+Selecting Root device checks `su` access first by running `id -u` through the root manager. After access is confirmed, DiskTree runs a local `du` process as root and scans `/data`, the Android user-data partition. The root manager may display a permission prompt when the check or scan starts. DiskTree does not delete or modify files.
 
 ## Build with GitHub Actions
 
@@ -46,7 +46,7 @@ The project does not require a Gradle wrapper because the Actions workflow insta
 
 ## Project layout
 
-- `app/src/main/java/com/disktree/app/DiskScanner.kt` parses the native `find -printf` stream and builds the size-sorted tree.
+- `app/src/main/java/com/disktree/app/DiskScanner.kt` parses the native `du -a -k` stream and builds the size-sorted tree.
 - `app/src/main/java/com/disktree/app/DiskTreeViewModel.kt` owns scan state, progress, cancellation, and storage capacity data.
 - `app/src/main/java/com/disktree/app/DiskTreeScreen.kt` contains the Compose interface and tree rows.
 - `app/src/test/java/com/disktree/app/DiskTreeTest.kt` covers parsing, sorting, and tree expansion.

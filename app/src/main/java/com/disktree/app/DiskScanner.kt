@@ -1,6 +1,7 @@
 package com.disktree.app
 
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -15,18 +16,28 @@ internal data class RawEntry(
 internal class TreeBuilder(private val rootPath: String) {
     private data class MutableNode(
         val path: String,
-        val isDirectory: Boolean,
+        var isDirectory: Boolean,
         val ownSizeBytes: Long,
+        val reportedSizeIncludesChildren: Boolean,
         val children: MutableList<MutableNode> = mutableListOf(),
     )
 
     private val nodes = linkedMapOf(
-        rootPath to MutableNode(rootPath, isDirectory = true, ownSizeBytes = 0L),
+        rootPath to MutableNode(
+            path = rootPath,
+            isDirectory = true,
+            ownSizeBytes = 0L,
+            reportedSizeIncludesChildren = false,
+        ),
     )
 
     fun accept(line: String): RawEntry? {
         val fields = line.split('\t', limit = 4)
-        if (fields.size != 4 || fields[0].length != 1) return null
+        return if (fields.size == 4 && fields[0].length == 1) acceptFind(fields) else acceptDu(line)
+    }
+
+    private fun acceptFind(fields: List<String>): RawEntry? {
+        if (fields[0].length != 1) return null
 
         val allocatedBlocks = fields[1].toLongOrNull()?.coerceAtLeast(0L) ?: return null
         val logicalSize = fields[2].toLongOrNull()?.coerceAtLeast(0L) ?: return null
@@ -36,11 +47,34 @@ internal class TreeBuilder(private val rootPath: String) {
 
         val isDirectory = fields[0] == "d"
         if (path == rootPath && !isDirectory) return null
-        nodes[path] = MutableNode(path, isDirectory, sizeBytes)
+        nodes[path] = MutableNode(path, isDirectory, sizeBytes, false)
+        return RawEntry(path, isDirectory, sizeBytes)
+    }
+
+    private fun acceptDu(line: String): RawEntry? {
+        val delimiter = line.indexOfFirst { it == '\t' || it == ' ' }
+        if (delimiter <= 0) return null
+
+        val sizeBytes = line.substring(0, delimiter).toLongOrNull()?.coerceAtLeast(0L) ?: return null
+        val path = normalize(line.substring(delimiter + 1).trimStart(' '))
+        if (!isWithinRoot(path)) return null
+
+        val isDirectory = path == rootPath
+        nodes[path] = MutableNode(path, isDirectory, sizeBytes, true)
         return RawEntry(path, isDirectory, sizeBytes)
     }
 
     fun build(): ScanNode {
+        nodes.values
+            .filterNot { it.path == rootPath }
+            .forEach { node ->
+                var parent = parentOf(node.path)
+                while (parent != null) {
+                    val parentNode = nodes[parent] ?: break
+                    parentNode.isDirectory = true
+                    parent = parentOf(parent)
+                }
+            }
         nodes.values
             .filterNot { it.path == rootPath }
             .forEach { node ->
@@ -57,7 +91,12 @@ internal class TreeBuilder(private val rootPath: String) {
                 compareByDescending<ScanNode> { it.sizeBytes }
                     .thenBy { it.name.lowercase() },
             )
-        val sizeBytes = node.ownSizeBytes + children.sumOf(ScanNode::sizeBytes)
+        val childBytes = children.sumOf(ScanNode::sizeBytes)
+        val sizeBytes = if (node.isDirectory && node.reportedSizeIncludesChildren) {
+            maxOf(node.ownSizeBytes, childBytes)
+        } else {
+            node.ownSizeBytes + childBytes
+        }
         return ScanNode(
             path = node.path,
             name = node.path.substringAfterLast('/').ifEmpty { node.path },
@@ -99,6 +138,35 @@ internal class DiskScanner {
     @Volatile
     private var activeProcess: Process? = null
 
+    suspend fun isRootAvailable(): Boolean = withContext(Dispatchers.IO) {
+        val process = try {
+            ProcessBuilder("su", "-c", "id -u")
+                .redirectErrorStream(true)
+                .start()
+        } catch (_: IOException) {
+            return@withContext false
+        } catch (_: SecurityException) {
+            return@withContext false
+        }
+
+        try {
+            if (!process.waitFor(8L, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                return@withContext false
+            }
+            process.exitValue() == 0 && process.inputStream.bufferedReader().use {
+                isRootIdOutput(it.readText())
+            }
+        } catch (_: InterruptedException) {
+            process.destroyForcibly()
+            Thread.currentThread().interrupt()
+            false
+        } catch (_: IOException) {
+            process.destroyForcibly()
+            false
+        }
+    }
+
     suspend fun scan(
         useRoot: Boolean,
         sharedStoragePath: String,
@@ -110,7 +178,6 @@ internal class DiskScanner {
         activeProcess = process
 
         var entryCount = 0L
-        var fileCount = 0L
         var scannedBytes = 0L
         val errors = mutableListOf<String>()
 
@@ -128,10 +195,7 @@ internal class DiskScanner {
                     }
 
                     entryCount++
-                    if (!entry.isDirectory) {
-                        fileCount++
-                        scannedBytes += entry.sizeBytes
-                    }
+                    scannedBytes += entry.sizeBytes
                     if (entryCount % 128L == 0L) {
                         onProgress(ScanProgress(entry.path, entryCount, scannedBytes))
                     }
@@ -140,8 +204,9 @@ internal class DiskScanner {
 
             val exitCode = process.waitFor()
             currentCoroutineContext().ensureActive()
+            val rootNode = tree.build()
             val detail = errors.firstOrNull().orEmpty()
-            if (entryCount == 0L || (useRoot && fileCount == 0L && exitCode != 0)) {
+            if (entryCount == 0L || (exitCode != 0 && rootNode.children.isEmpty())) {
                 throw ScanException(
                     if (useRoot) {
                         detail.ifBlank { "Root access was denied. Approve DiskTree in your root manager and try again." }
@@ -153,7 +218,7 @@ internal class DiskScanner {
 
             onProgress(ScanProgress(rootPath, entryCount, scannedBytes))
             ScanResult(
-                root = tree.build(),
+                root = rootNode,
                 warning = if (exitCode != 0 || errors.isNotEmpty()) {
                     "Some protected paths were skipped."
                 } else {
@@ -173,22 +238,23 @@ internal class DiskScanner {
     }
 
     private fun startProcess(useRoot: Boolean, sharedStoragePath: String): Process {
-        val format = "%y\\t%b\\t%s\\t%p\\n"
         return if (useRoot) {
             ProcessBuilder(
                 "su",
                 "-c",
-                "exec /system/bin/find /data -printf '$format'",
+                "exec /system/bin/du -a -k /data",
             ).redirectErrorStream(true).start()
         } else {
             ProcessBuilder(
-                "/system/bin/find",
-                "-printf",
-                format,
+                "/system/bin/du",
+                "-a",
+                "-k",
                 sharedStoragePath,
             ).redirectErrorStream(true).start()
         }
     }
 }
+
+internal fun isRootIdOutput(output: String): Boolean = output.trim().toLongOrNull() == 0L
 
 internal class ScanException(message: String) : Exception(message)
