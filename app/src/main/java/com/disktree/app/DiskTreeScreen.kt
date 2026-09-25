@@ -22,31 +22,45 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,7 +81,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
-import java.util.Locale
 import kotlin.math.roundToInt
 
 private val MeterTextStyle = TextStyle(
@@ -87,6 +100,13 @@ fun DiskTreeScreen(
     onSelectNode: (ScanNode) -> Unit,
     onRequestStorageAccess: () -> Unit,
     onCheckRootAccess: () -> Unit,
+    onListMode: (ListMode) -> Unit,
+    onSortMode: (SortMode) -> Unit,
+    onQueryChange: (String) -> Unit,
+    onRevealPath: (String) -> Unit,
+    onOpenPath: (String) -> Unit,
+    onCopyPath: (String) -> Unit,
+    onExport: () -> Unit,
 ) {
     val scanning = state.phase == ScanPhase.Scanning
     Scaffold(
@@ -158,11 +178,23 @@ fun DiskTreeScreen(
                     state.phase == ScanPhase.Complete && state.root != null -> ResultTree(
                         modifier = Modifier.weight(1f),
                         sizeMode = state.sizeMode,
+                        listMode = state.listMode,
+                        sortMode = state.sortMode,
+                        query = state.query,
                         root = state.root,
                         expandedPaths = state.expandedPaths,
                         selectedPath = state.selectedPath,
+                        selectedNode = state.selectedNode(),
                         warning = state.warning,
+                        notice = state.notice,
                         onSelectNode = onSelectNode,
+                        onListMode = onListMode,
+                        onSortMode = onSortMode,
+                        onQueryChange = onQueryChange,
+                        onRevealPath = onRevealPath,
+                        onOpenPath = onOpenPath,
+                        onCopyPath = onCopyPath,
+                        onExport = onExport,
                     )
 
                     else -> IdleState(Modifier.weight(1f), state.scope)
@@ -217,26 +249,29 @@ private fun SizeModeSelector(
 
 @Composable
 private fun <T> SegmentedSelector(
-    label: String,
+    label: String?,
     options: List<SegmentOption<T>>,
     selected: T,
     enabled: Boolean,
     onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
     supporting: String? = null,
 ) {
     val shape = MaterialTheme.shapes.medium
     val idleColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.5f)
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp, top = 10.dp),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
+        if (label != null) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -616,19 +651,42 @@ private fun IconBadge(icon: ImageVector) {
 private fun ResultTree(
     modifier: Modifier,
     sizeMode: SizeMode,
+    listMode: ListMode,
+    sortMode: SortMode,
+    query: String,
     root: ScanNode,
     expandedPaths: Set<String>,
     selectedPath: String?,
+    selectedNode: ScanNode?,
     warning: String?,
+    notice: String?,
     onSelectNode: (ScanNode) -> Unit,
+    onListMode: (ListMode) -> Unit,
+    onSortMode: (SortMode) -> Unit,
+    onQueryChange: (String) -> Unit,
+    onRevealPath: (String) -> Unit,
+    onOpenPath: (String) -> Unit,
+    onCopyPath: (String) -> Unit,
+    onExport: () -> Unit,
 ) {
-    val visibleNodes = remember(root, expandedPaths) { flattenTree(root, expandedPaths) }
+    val filtering = query.isNotBlank()
+    val shownRoot = remember(root, query) {
+        val filtered = filterTree(root, query)
+        (filtered ?: root).copy(sizeBytes = root.sizeBytes)
+    }
+    val activeExpanded = remember(shownRoot, expandedPaths, filtering) {
+        if (filtering) allExpandablePaths(shownRoot) else expandedPaths
+    }
+    val insights = remember(shownRoot) { buildInsights(shownRoot) }
+    val matchCount = remember(shownRoot, filtering) {
+        if (filtering) allNodes(shownRoot).count { it.path != shownRoot.path } else 0
+    }
 
     Column(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -636,6 +694,8 @@ private fun ResultTree(
                 Text(
                     text = if (sizeMode == SizeMode.LOGICAL) "Largest by file size" else "Largest by disk usage",
                     style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
                 MeterText(
@@ -645,7 +705,7 @@ private fun ResultTree(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 MeterText(text = formatBytes(root.sizeBytes), style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -654,43 +714,416 @@ private fun ResultTree(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            TextButton(onClick = onExport, modifier = Modifier.heightIn(min = 44.dp)) {
+                Text("Export CSV")
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        ResultToolbar(
+            listMode = listMode,
+            sortMode = sortMode,
+            onListMode = onListMode,
+            onSortMode = onSortMode,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        SearchField(
+            query = query,
+            onQueryChange = onQueryChange,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
         if (warning != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            NoticeBand(text = warning)
+        }
+        if (notice != null) {
+            NoticeBand(text = notice)
+        }
+        if (insights.isNotEmpty() && !filtering) {
+            SuggestionsPanel(insights = insights, onInsightClick = onInsightClick(onListMode, onRevealPath))
+        }
+        if (selectedNode != null) {
+            SelectionStrip(
+                node = selectedNode,
+                onCopyPath = { onCopyPath(selectedNode.path) },
+                onOpen = { onOpenPath(selectedNode.path) },
+            )
+        }
+        if (filtering) {
+            Text(
+                text = "$matchCount matches for \"$query\"",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, top = 10.dp),
+            )
+        }
+        when {
+            filtering -> TreeList(
+                modifier = Modifier.weight(1f),
+                root = shownRoot,
+                expandedPaths = activeExpanded,
+                selectedPath = selectedPath,
+                onSelectNode = onSelectNode,
+            )
+
+            listMode == ListMode.LARGEST -> LargestFilesList(
+                modifier = Modifier.weight(1f),
+                files = remember(shownRoot, sortMode) { largestFiles(shownRoot, sortMode) },
+                rootTotal = shownRoot.sizeBytes,
+                onSelectNode = onSelectNode,
+            )
+
+            else -> TreeList(
+                modifier = Modifier.weight(1f),
+                root = shownRoot,
+                expandedPaths = activeExpanded,
+                selectedPath = selectedPath,
+                onSelectNode = onSelectNode,
+            )
+        }
+    }
+}
+
+private fun onInsightClick(
+    onListMode: (ListMode) -> Unit,
+    onRevealPath: (String) -> Unit,
+): (SpaceInsight) -> Unit = { insight ->
+    when {
+        insight.kind == InsightKind.BIG_FILES -> onListMode(ListMode.LARGEST)
+        insight.targetPath != null -> onRevealPath(insight.targetPath)
+    }
+}
+
+@Composable
+private fun ResultToolbar(
+    listMode: ListMode,
+    sortMode: SortMode,
+    onListMode: (ListMode) -> Unit,
+    onSortMode: (SortMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SegmentedSelector(
+            label = null,
+            options = listOf(
+                SegmentOption(ListMode.TREE, "Tree", Icons.Outlined.Storage),
+                SegmentOption(ListMode.LARGEST, "Largest", Icons.Outlined.Sort),
+            ),
+            selected = listMode,
+            enabled = true,
+            onSelect = onListMode,
+            modifier = Modifier.width(220.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        Box {
+            OutlinedButton(
+                onClick = { sortMenuOpen = true },
+                contentPadding = ButtonDefaults.ContentPadding,
+                modifier = Modifier.heightIn(min = 44.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = warning,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Icon(Icons.Outlined.Sort, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(sortLabel(sortMode), maxLines = 1)
+            }
+            DropdownMenu(
+                expanded = sortMenuOpen,
+                onDismissRequest = { sortMenuOpen = false },
+            ) {
+                SortMode.entries.forEach { mode ->
+                    DropdownMenuItem(
+                        text = { Text(sortLabel(mode)) },
+                        onClick = {
+                            onSortMode(mode)
+                            sortMenuOpen = false
+                        },
+                        leadingIcon = if (mode == sortMode) {
+                            { Icon(Icons.Outlined.Check, contentDescription = null) }
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
         }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = 12.dp),
+    }
+}
+
+private fun sortLabel(sortMode: SortMode): String = when (sortMode) {
+    SortMode.SIZE -> "Size"
+    SortMode.NAME -> "Name"
+    SortMode.PATH -> "Path"
+}
+
+@Composable
+private fun SearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium,
+        placeholder = { Text("Search names", style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                TextButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Clear search")
+                }
+            }
+        },
+        shape = MaterialTheme.shapes.medium,
+    )
+}
+
+@Composable
+private fun NoticeBand(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Info,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SuggestionsPanel(
+    insights: List<SpaceInsight>,
+    onInsightClick: (SpaceInsight) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            .padding(vertical = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            items(visibleNodes, key = { it.node.path }) { visible ->
-                StorageTreeRow(
-                    visible = visible,
-                    expanded = expandedPaths.contains(visible.node.path),
-                    selected = selectedPath == visible.node.path,
-                    onClick = { onSelectNode(visible.node) },
+            Icon(
+                imageVector = Icons.Outlined.Lightbulb,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Space suggestions",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        insights.forEach { insight ->
+            SpaceInsightRow(insight = insight, onClick = { onInsightClick(insight) })
+        }
+    }
+}
+
+@Composable
+private fun SpaceInsightRow(insight: SpaceInsight, onClick: () -> Unit) {
+    val clickable = insight.kind == InsightKind.BIG_FILES || insight.targetPath != null
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (clickable) Modifier.selectable(selected = false, onClick = onClick) else Modifier)
+            .heightIn(min = 44.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = insight.title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = insight.detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        MeterText(
+            text = formatBytes(insight.sizeBytes),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SelectionStrip(
+    node: ScanNode,
+    onCopyPath: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = node.name,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Selected",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onCopyPath, modifier = Modifier.heightIn(min = 44.dp)) {
+            Text("Copy path")
+        }
+        if (!node.isDirectory) {
+            TextButton(onClick = onOpen, modifier = Modifier.heightIn(min = 44.dp)) {
+                Icon(Icons.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Open")
+            }
+        }
+    }
+}
+
+@Composable
+private fun TreeList(
+    modifier: Modifier,
+    root: ScanNode,
+    expandedPaths: Set<String>,
+    selectedPath: String?,
+    onSelectNode: (ScanNode) -> Unit,
+) {
+    val visibleNodes = remember(root, expandedPaths) { flattenTree(root, expandedPaths) }
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 12.dp),
+    ) {
+        items(visibleNodes, key = { it.node.path }) { visible ->
+            StorageTreeRow(
+                visible = visible,
+                expanded = expandedPaths.contains(visible.node.path),
+                selected = selectedPath == visible.node.path,
+                onClick = { onSelectNode(visible.node) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LargestFilesList(
+    modifier: Modifier,
+    files: List<ScanNode>,
+    rootTotal: Long,
+    onSelectNode: (ScanNode) -> Unit,
+) {
+    if (files.isEmpty()) {
+        StatePanel(
+            modifier = modifier,
+            icon = Icons.Outlined.Search,
+            title = "No files found",
+            message = "This scan found no files to list.",
+        )
+        return
+    }
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 12.dp),
+    ) {
+        items(files, key = { it.path }) { file ->
+            FileResultRow(
+                file = file,
+                share = if (rootTotal > 0L) file.sizeBytes.toFloat() / rootTotal.toFloat() else 0f,
+                onClick = { onSelectNode(file) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FileResultRow(
+    file: ScanNode,
+    share: Float,
+    onClick: () -> Unit,
+) {
+    val mutedColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = false, role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "${file.name}, file, ${formatBytes(file.sizeBytes)}"
+            },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Description,
+                contentDescription = null,
+                tint = mutedColor,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = file.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = file.path,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = mutedColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                MeterText(text = formatBytes(file.sizeBytes), style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = formatPercent(share),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = mutedColor,
                 )
             }
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
     }
 }
 
@@ -934,19 +1367,6 @@ private fun itemLabel(count: Int): String = if (count == 1) "1 item" else "$coun
 private fun formatPercent(share: Float): String {
     val percent = (share * 100f).roundToInt()
     return if (percent >= 1) "$percent%" else "<1%"
-}
-
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 1_000L) return "$bytes B"
-    val units = arrayOf("KB", "MB", "GB", "TB", "PB")
-    var value = bytes.toDouble()
-    var unitIndex = -1
-    while (value >= 1_000.0 && unitIndex < units.lastIndex) {
-        value /= 1_000.0
-        unitIndex++
-    }
-    val pattern = if (value < 10.0) "%.1f %s" else "%.0f %s"
-    return String.format(Locale.getDefault(), pattern, value, units[unitIndex])
 }
 
 private fun formatInteger(value: Long): String = NumberFormat.getIntegerInstance().format(value)

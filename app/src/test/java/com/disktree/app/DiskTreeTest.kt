@@ -149,4 +149,75 @@ class DiskTreeTest {
         assertTrue(shouldWarnAboutSkippedPaths(exitCode = 0, unexpectedErrorCount = 1, expectedProtectionError = true))
         assertFalse(shouldWarnAboutSkippedPaths(exitCode = 0, unexpectedErrorCount = 0, expectedProtectionError = false))
     }
+
+    private fun sampleTree(): ScanNode {
+        val video = ScanNode("/sdcard/Movies/clip.mp4", "clip.mp4", 2_000L, isDirectory = false)
+        val movies = ScanNode("/sdcard/Movies", "Movies", 2_000L, isDirectory = true, children = listOf(video))
+        val cache = ScanNode("/sdcard/Android/cache.tmp", "cache.tmp", 600L, isDirectory = false)
+        val download = ScanNode("/sdcard/Download", "Download", 3_000L, isDirectory = true, children = listOf(cache))
+        return ScanNode("/sdcard", "sdcard", 5_000L, isDirectory = true, children = listOf(movies, download))
+    }
+
+    @Test
+    fun filtersTreeByNameKeepingAncestors() {
+        val filtered = filterTree(sampleTree(), "clip")
+
+        assertNotNull(filtered)
+        assertEquals(listOf("Movies"), filtered!!.children.map { it.name })
+        assertEquals("clip.mp4", filtered.children[0].children[0].name)
+    }
+
+    @Test
+    fun keepsRootWhenNothingMatches() {
+        val noMatch = filterTree(sampleTree(), "nothing-here")
+
+        assertNotNull(noMatch)
+        assertTrue(noMatch!!.children.isEmpty())
+        assertNotNull(filterTree(sampleTree(), "   "))
+    }
+
+    @Test
+    fun listsLargestFilesWithSortModes() {
+        val root = sampleTree()
+
+        assertEquals(
+            listOf("clip.mp4", "cache.tmp"),
+            largestFiles(root, SortMode.SIZE).map { it.name },
+        )
+        assertEquals(
+            listOf("cache.tmp", "clip.mp4"),
+            largestFiles(root, SortMode.NAME).map { it.name },
+        )
+        assertEquals(
+            listOf("cache.tmp", "clip.mp4"),
+            largestFiles(root, SortMode.PATH).map { it.name },
+        )
+        assertEquals(1, largestFiles(root, SortMode.SIZE, limit = 1).size)
+    }
+
+    @Test
+    fun buildsRealSpaceInsights() {
+        val insights = buildInsights(sampleTree())
+
+        assertTrue(insights.any { it.kind == InsightKind.TOP_FOLDER && it.title.contains("Download") })
+        assertTrue(insights.none { it.kind == InsightKind.BIG_FILES })
+        assertTrue(insights.all { it.sizeBytes > 0L })
+    }
+
+    @Test
+    fun reportsExpandablePaths() {
+        assertEquals(
+            setOf("/sdcard", "/sdcard/Movies", "/sdcard/Download"),
+            allExpandablePaths(sampleTree()),
+        )
+    }
+
+    @Test
+    fun writesCsvReportWithEscapedPaths() {
+        val csv = reportCsv(sampleTree(), "shared storage", "file size")
+
+        assertTrue(csv.startsWith("path,type,size_bytes,percent_of_root,size_view,scope"))
+        assertTrue(csv.contains("\"/sdcard/Movies/clip.mp4\",file,2000,40.00,file size,shared storage"))
+        assertEquals(6, csv.trim().lines().size)
+    }
 }
