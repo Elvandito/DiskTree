@@ -43,7 +43,21 @@ internal class TreeBuilder(
         val rawSize = line.substring(0, delimiter).toLongOrNull()?.coerceAtLeast(0L) ?: return null
         val path = normalize(line.substring(delimiter + 1).trimStart(' '))
         if (!isWithinRoot(path)) return null
-        if (hideAndroidAppDirs && isAndroidAppDir(path)) return null
+        if (hideAndroidAppDirs && isAndroidAppDir(path)) {
+            if (path.endsWith("/Android/data") || path.endsWith("/Android/obb")) {
+                parentOf(path)?.let { parent ->
+                    nodes.getOrPut(parent) {
+                        MutableNode(
+                            path = parent,
+                            isDirectory = true,
+                            ownSizeBytes = 0L,
+                            reportedSizeIncludesChildren = false,
+                        )
+                    }.isDirectory = true
+                }
+            }
+            return null
+        }
 
         val reportedSizeIncludesChildren = sizeMode == SizeMode.ALLOCATED
         val sizeBytes = if (reportedSizeIncludesChildren) rawSize * 1024L else rawSize
@@ -53,13 +67,19 @@ internal class TreeBuilder(
     }
 
     fun build(): ScanNode {
-        nodes.values
+        nodes.values.toList()
             .filterNot { it.path == rootPath }
             .forEach { node ->
                 var parent = parentOf(node.path)
-                while (parent != null) {
-                    val parentNode = nodes[parent] ?: break
-                    parentNode.isDirectory = true
+                while (parent != null && parent != rootPath) {
+                    nodes.getOrPut(parent) {
+                        MutableNode(
+                            path = parent,
+                            isDirectory = true,
+                            ownSizeBytes = 0L,
+                            reportedSizeIncludesChildren = false,
+                        )
+                    }.isDirectory = true
                     parent = parentOf(parent)
                 }
             }

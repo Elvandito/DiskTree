@@ -8,11 +8,14 @@ import androidx.lifecycle.viewModelScope
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+private const val SCAN_COOLDOWN_MS = 20_000L
 
 data class ScanNode(
     val path: String,
@@ -69,6 +72,7 @@ data class DiskTreeUiState(
     val rootAccess: RootAccess = RootAccess.UNKNOWN,
     val capacity: StorageCapacity? = null,
     val warning: String? = null,
+    val scanCooldown: Boolean = false,
 )
 
 fun flattenTree(root: ScanNode, expandedPaths: Set<String>): List<VisibleNode> {
@@ -105,6 +109,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
     val state: StateFlow<DiskTreeUiState> = _state.asStateFlow()
     private var scanJob: Job? = null
     private var rootCheckJob: Job? = null
+    private var cooldownJob: Job? = null
 
     fun selectScope(scope: ScanScope) {
         if (_state.value.phase == ScanPhase.Scanning) return
@@ -115,6 +120,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
             return
         }
         val path = if (scope == ScanScope.ROOT_DEVICE) "/data" else sharedStoragePath
+        cooldownJob?.cancel()
         _state.update {
             it.copy(
                 scope = scope,
@@ -126,6 +132,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
                 rootAccess = RootAccess.UNKNOWN,
                 capacity = readCapacity(File(path)),
                 warning = null,
+                scanCooldown = false,
             )
         }
         if (scope == ScanScope.ROOT_DEVICE) checkRootAccess()
@@ -136,6 +143,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
             _state.value.phase == ScanPhase.Scanning ||
             _state.value.sizeMode == sizeMode
         ) return
+        cooldownJob?.cancel()
         _state.update {
             it.copy(
                 sizeMode = sizeMode,
@@ -145,6 +153,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
                 expandedPaths = emptySet(),
                 selectedPath = null,
                 warning = null,
+                scanCooldown = false,
             )
         }
     }
@@ -181,7 +190,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun scan(hasStorageAccess: Boolean) {
-        if (_state.value.phase == ScanPhase.Scanning) return
+        if (_state.value.phase == ScanPhase.Scanning || _state.value.scanCooldown) return
         val scope = _state.value.scope
         if (scope == ScanScope.SHARED_STORAGE && !hasStorageAccess) {
             _state.update {
@@ -223,6 +232,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
                         warning = result.warning,
                     )
                 }
+                startCooldown()
             } catch (error: CancellationException) {
                 _state.update { it.copy(phase = ScanPhase.Idle, progress = ScanProgress()) }
                 throw error
@@ -233,6 +243,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
                         progress = ScanProgress(),
                     )
                 }
+                startCooldown()
             }
         }
     }
@@ -260,7 +271,17 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         scanner.cancel()
         rootCheckJob?.cancel()
+        cooldownJob?.cancel()
         super.onCleared()
+    }
+
+    private fun startCooldown() {
+        cooldownJob?.cancel()
+        _state.update { it.copy(scanCooldown = true) }
+        cooldownJob = viewModelScope.launch {
+            delay(SCAN_COOLDOWN_MS)
+            _state.update { it.copy(scanCooldown = false) }
+        }
     }
 
     private fun readCapacity(file: File): StorageCapacity? = runCatching {

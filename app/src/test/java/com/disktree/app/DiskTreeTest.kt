@@ -112,6 +112,7 @@ class DiskTreeTest {
         val root = builder.build()
 
         assertEquals(listOf("Download", "Android"), root.children.map { it.name })
+        assertTrue(root.children[0].isDirectory)
         assertEquals(9_000L, root.children[0].sizeBytes)
         assertEquals(4_096L, root.children[1].sizeBytes)
         assertTrue(root.children[1].children.isEmpty())
@@ -129,7 +130,9 @@ class DiskTreeTest {
 
         assertEquals(listOf("Android"), root.children.map { it.name })
         assertEquals(4_196L, root.children.single().sizeBytes)
-        assertEquals("other.app", root.children.single().children.single().name)
+        val data = root.children.single().children.single()
+        assertEquals("data", data.name)
+        assertEquals("other.app", data.children.single().name)
     }
 
     @Test

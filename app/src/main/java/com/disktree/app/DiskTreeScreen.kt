@@ -107,6 +107,7 @@ fun DiskTreeScreen(
                 sizeMode = state.sizeMode,
                 rootAccess = state.rootAccess,
                 hasStorageAccess = hasStorageAccess,
+                scanCooldown = state.scanCooldown,
                 onScan = onScan,
                 onCancelScan = onCancelScan,
                 onRequestStorageAccess = onRequestStorageAccess,
@@ -818,6 +819,7 @@ private fun ScanActionBar(
     sizeMode: SizeMode,
     rootAccess: RootAccess,
     hasStorageAccess: Boolean,
+    scanCooldown: Boolean,
     onScan: () -> Unit,
     onCancelScan: () -> Unit,
     onRequestStorageAccess: () -> Unit,
@@ -856,6 +858,7 @@ private fun ScanActionBar(
             val context = when {
                 needsRootCheck -> "Root access is required before scanning /data"
                 needsPermission -> "Storage permission is required before scanning shared storage"
+                scanCooldown -> "Storage is resting briefly after the last scan"
                 else -> {
                     val target = if (scope == ScanScope.ROOT_DEVICE) "/data" else "Shared storage"
                     val measurement = if (sizeMode == SizeMode.LOGICAL) "File size" else "Disk usage"
@@ -866,6 +869,7 @@ private fun ScanActionBar(
                 checkingRoot -> "Checking root access"
                 needsRootCheck -> "Check root access"
                 needsPermission -> "Grant file access"
+                scanCooldown -> "Just scanned"
                 complete -> "Scan again"
                 scope == ScanScope.ROOT_DEVICE -> "Scan with root"
                 sizeMode == SizeMode.LOGICAL -> "Scan file sizes"
@@ -874,6 +878,7 @@ private fun ScanActionBar(
             val icon = when {
                 needsRootCheck -> Icons.Outlined.Shield
                 needsPermission -> Icons.Outlined.LockOpen
+                scanCooldown -> Icons.Outlined.Refresh
                 complete -> Icons.Outlined.Refresh
                 scope == ScanScope.ROOT_DEVICE -> Icons.Outlined.Shield
                 else -> Icons.Outlined.Storage
@@ -892,7 +897,7 @@ private fun ScanActionBar(
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = action,
-                enabled = !checkingRoot,
+                enabled = !checkingRoot && !scanCooldown,
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 52.dp),

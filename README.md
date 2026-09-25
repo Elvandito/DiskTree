@@ -6,6 +6,7 @@ DiskTree is an Android storage analyzer for finding large files and folders. It 
 
 - Scan shared storage without root access.
 - Scan the device data partition through a root manager that exposes `su`.
+- Scan only on demand, with a short cooldown between full scans.
 - Sort folders and files by size.
 - Expand and collapse folders in a virtualized list.
 - Switch between logical file size, which matches file managers, and allocated disk usage.
