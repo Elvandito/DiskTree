@@ -97,17 +97,4 @@ class DiskTreeTest {
         assertEquals(2, appExpanded[2].depth)
         assertEquals(500f / 750f, appExpanded[2].share, 0.001f)
     }
-
-    @Test
-    fun validatesSharedFileNameRules() {
-        assertTrue(validFileName("backup 1.txt"))
-        assertTrue(validFileName("folder"))
-        assertFalse(validFileName(""))
-        assertFalse(validFileName("   "))
-        assertFalse(validFileName("nested/name"))
-        assertFalse(validFileName("."))
-        assertFalse(validFileName(".."))
-        assertFalse(validFileName("bad\u0000name"))
-        assertFalse(validFileName("a".repeat(256)))
-    }
 }

@@ -21,9 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Info
@@ -32,9 +30,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -42,19 +38,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -80,21 +70,8 @@ fun DiskTreeScreen(
     onSelectNode: (ScanNode) -> Unit,
     onRequestStorageAccess: () -> Unit,
     onCheckRootAccess: () -> Unit,
-    onRenameSelected: (String) -> Unit,
-    onDeleteSelected: () -> Unit,
 ) {
     val scanning = state.phase == ScanPhase.Scanning
-    val actionBusy = state.fileAction == FileActionPhase.Working
-    var renameStep by remember { mutableStateOf(0) }
-    var deleteStep by remember { mutableStateOf(0) }
-    var pendingRename by remember { mutableStateOf("") }
-    val selectedNode = state.selectedNode
-
-    LaunchedEffect(selectedNode?.path) {
-        renameStep = 0
-        deleteStep = 0
-        pendingRename = ""
-    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -112,7 +89,6 @@ fun DiskTreeScreen(
                 phase = state.phase,
                 sizeMode = state.sizeMode,
                 rootAccess = state.rootAccess,
-                fileAction = state.fileAction,
                 hasStorageAccess = hasStorageAccess,
                 onScan = onScan,
                 onCancelScan = onCancelScan,
@@ -134,12 +110,12 @@ fun DiskTreeScreen(
             ) {
                 ScopeSelector(
                     selected = state.scope,
-                    enabled = !scanning && !actionBusy,
+                    enabled = !scanning,
                     onSelect = onSelectScope,
                 )
                 SizeModeSelector(
                     selected = state.sizeMode,
-                    enabled = !scanning && !actionBusy,
+                    enabled = !scanning,
                     onSelect = onSelectSizeMode,
                 )
                 StorageSummary(state.capacity)
@@ -166,63 +142,13 @@ fun DiskTreeScreen(
                         root = state.root,
                         expandedPaths = state.expandedPaths,
                         selectedPath = state.selectedPath,
-                        selectedNode = state.selectedNode,
-                        fileAction = state.fileAction,
                         warning = state.warning,
                         onSelectNode = onSelectNode,
-                        onRename = {
-                            deleteStep = 0
-                            renameStep = 1
-                        },
-                        onDelete = {
-                            renameStep = 0
-                            deleteStep = 1
-                        },
                     )
 
                     else -> IdleState(Modifier.weight(1f), state.scope)
                 }
             }
-        }
-    }
-
-    if (selectedNode != null) {
-        when {
-            renameStep == 1 -> RenameDialog(
-                node = selectedNode,
-                onDismiss = { renameStep = 0 },
-                onContinue = { name ->
-                    pendingRename = name
-                    renameStep = 2
-                },
-            )
-
-            renameStep == 2 -> ConfirmRenameDialog(
-                node = selectedNode,
-                newName = pendingRename,
-                onDismiss = { renameStep = 0 },
-                onConfirm = {
-                    renameStep = 0
-                    onRenameSelected(pendingRename)
-                },
-            )
-
-            deleteStep == 1 -> DeleteDialog(
-                node = selectedNode,
-                finalStep = false,
-                onDismiss = { deleteStep = 0 },
-                onContinue = { deleteStep = 2 },
-            )
-
-            deleteStep == 2 -> DeleteDialog(
-                node = selectedNode,
-                finalStep = true,
-                onDismiss = { deleteStep = 0 },
-                onConfirm = {
-                    deleteStep = 0
-                    onDeleteSelected()
-                },
-            )
         }
     }
 }
@@ -503,12 +429,8 @@ private fun ResultTree(
     root: ScanNode,
     expandedPaths: Set<String>,
     selectedPath: String?,
-    selectedNode: ScanNode?,
-    fileAction: FileActionPhase,
     warning: String?,
     onSelectNode: (ScanNode) -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
 ) {
     val visibleNodes = remember(root, expandedPaths) { flattenTree(root, expandedPaths) }
 
@@ -557,62 +479,6 @@ private fun ResultTree(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        if (selectedNode != null) {
-            val node = selectedNode
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-            ) {
-                Text(
-                    text = "Selected path",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(text = node.path, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = onRename,
-                        enabled = fileAction != FileActionPhase.Working,
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp),
-                    ) {
-                        Icon(Icons.Outlined.Edit, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                        Text("Rename")
-                    }
-                    Button(
-                        onClick = onDelete,
-                        enabled = fileAction != FileActionPhase.Working,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError,
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 48.dp),
-                    ) {
-                        Icon(Icons.Outlined.DeleteOutline, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                        Text("Delete")
-                    }
-                }
-                if (fileAction is FileActionPhase.Failed) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = fileAction.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
         }
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -708,157 +574,11 @@ private fun StorageTreeRow(
 }
 
 @Composable
-private fun RenameDialog(
-    node: ScanNode,
-    onDismiss: () -> Unit,
-    onContinue: (String) -> Unit,
-) {
-    var name by remember(node.path) { mutableStateOf(node.name) }
-    val valid = validFileName(name)
-    val kind = if (node.isDirectory) "folder" else "file"
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Rename $kind") },
-        text = {
-            Column {
-                Text("Enter a new name for this $kind.")
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    singleLine = true,
-                    label = { Text("New name") },
-                    isError = !valid,
-                )
-                if (!valid) {
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "Use a non-empty name without / and not . or ..",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onContinue(name) },
-                enabled = valid,
-            ) {
-                Text("Continue")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
-}
-
-@Composable
-private fun ConfirmRenameDialog(
-    node: ScanNode,
-    newName: String,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Confirm rename") },
-        text = {
-            Column {
-                Text("Rename this item from")
-                Text(node.name, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-                Text("to")
-                Text(newName, fontWeight = FontWeight.SemiBold)
-            }
-        },
-        confirmButton = {
-            Button(onClick = onConfirm) {
-                Text("Rename")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
-}
-
-@Composable
-private fun DeleteDialog(
-    node: ScanNode,
-    finalStep: Boolean,
-    onDismiss: () -> Unit,
-    onContinue: () -> Unit = {},
-    onConfirm: () -> Unit = {},
-) {
-    val kind = if (node.isDirectory) "folder" else "file"
-    if (finalStep) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Delete permanently?") },
-            text = {
-                Column {
-                    Text("This will permanently delete this $kind:")
-                    Text(node.name, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("This action cannot be undone.")
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = onConfirm,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                    ),
-                ) {
-                    Text("Delete permanently")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel")
-                }
-            },
-        )
-    } else {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Delete $kind?") },
-            text = {
-                Column {
-                    Text("This will delete this $kind:")
-                    Text(node.name, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Continue to the final confirmation to proceed.")
-                }
-            },
-            confirmButton = {
-                Button(onClick = onContinue) {
-                    Text("Continue")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel")
-                }
-            },
-        )
-    }
-}
-
-@Composable
 private fun ScanActionBar(
     scope: ScanScope,
     phase: ScanPhase,
     sizeMode: SizeMode,
     rootAccess: RootAccess,
-    fileAction: FileActionPhase,
     hasStorageAccess: Boolean,
     onScan: () -> Unit,
     onCancelScan: () -> Unit,
@@ -866,7 +586,6 @@ private fun ScanActionBar(
     onCheckRootAccess: () -> Unit,
 ) {
     val scanning = phase == ScanPhase.Scanning
-    val actionBusy = fileAction == FileActionPhase.Working
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 3.dp,
@@ -894,7 +613,6 @@ private fun ScanActionBar(
                 val checkingRoot = scope == ScanScope.ROOT_DEVICE && rootAccess == RootAccess.CHECKING
                 val complete = phase == ScanPhase.Complete
                 val label = when {
-                    actionBusy -> "Working..."
                     checkingRoot -> "Checking root access"
                     needsRootCheck -> "Check root access"
                     needsPermission -> "Grant file access"
@@ -917,7 +635,7 @@ private fun ScanActionBar(
                 }
                 Button(
                     onClick = action,
-                    enabled = !checkingRoot && !actionBusy,
+                    enabled = !checkingRoot,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 52.dp),
@@ -929,15 +647,6 @@ private fun ScanActionBar(
             }
         }
     }
-}
-
-internal fun validFileName(name: String): Boolean {
-    return name.isNotBlank() &&
-        '/' !in name &&
-        '\u0000' !in name &&
-        name != "." &&
-        name != ".." &&
-        name.toByteArray().size <= 255
 }
 
 private fun formatBytes(bytes: Long): String {
