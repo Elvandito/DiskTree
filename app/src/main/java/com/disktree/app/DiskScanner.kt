@@ -13,11 +13,6 @@ internal data class RawEntry(
     val sizeBytes: Long,
 )
 
-enum class SizeMode {
-    LOGICAL,
-    ALLOCATED,
-}
-
 internal class TreeBuilder(
     private val rootPath: String,
     private val compactSizeIncludesChildren: Boolean = false,

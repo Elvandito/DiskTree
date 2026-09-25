@@ -789,7 +789,7 @@ private fun DeleteDialog(
     node: ScanNode,
     finalStep: Boolean,
     onDismiss: () -> Unit,
-    onContinue: () -> Unit,
+    onContinue: () -> Unit = {},
     onConfirm: () -> Unit = {},
 ) {
     val kind = if (node.isDirectory) "folder" else "file"

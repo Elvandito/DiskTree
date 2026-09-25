@@ -414,7 +414,7 @@ class DiskTreeViewModel(application: Application) : AndroidViewModel(application
 
     private fun isProtectedPath(path: String): Boolean {
         val canonicalPath = runCatching { File(path).canonicalPath }.getOrNull() ?: return true
-        val canonicalAppData = runCatching { File(appDataPath).canonicalPath }.getOrNull() ?: return true
+        val canonicalAppData = runCatching { appDataPath.canonicalPath }.getOrNull() ?: return true
         return canonicalPath == canonicalAppData || canonicalPath.startsWith("$canonicalAppData/")
     }
 
