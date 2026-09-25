@@ -93,6 +93,7 @@ private val MeterTextStyle = TextStyle(
 fun DiskTreeScreen(
     state: DiskTreeUiState,
     hasStorageAccess: Boolean,
+    selectedNode: ScanNode?,
     onSelectScope: (ScanScope) -> Unit,
     onSelectSizeMode: (SizeMode) -> Unit,
     onScan: () -> Unit,
@@ -184,7 +185,7 @@ fun DiskTreeScreen(
                         root = state.root,
                         expandedPaths = state.expandedPaths,
                         selectedPath = state.selectedPath,
-                        selectedNode = state.selectedNode(),
+                        selectedNode = selectedNode,
                         warning = state.warning,
                         notice = state.notice,
                         onSelectNode = onSelectNode,

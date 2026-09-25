@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
                 DiskTreeScreen(
                     state = state,
                     hasStorageAccess = hasStorageAccess,
+                    selectedNode = viewModel.selectedNode(),
                     onSelectScope = viewModel::selectScope,
                     onSelectSizeMode = viewModel::selectSizeMode,
                     onScan = { viewModel.scan(hasStorageAccess) },
