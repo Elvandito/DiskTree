@@ -18,7 +18,7 @@ DiskTree is an Android storage analyzer for finding large files and folders. It 
 
 Shared storage is the device's external storage directory. On Android 11 and newer, DiskTree requests the special all-files access permission. Older Android versions use `READ_EXTERNAL_STORAGE`.
 
-Android can hide some app-specific folders from standard access. The scan result reports when protected paths were skipped.
+On Android 11 and newer, the system hides `Android/data` and `Android/obb` from other apps even with all-files access. DiskTree skips those directories silently, and the result only reports a warning when other paths cannot be read.
 
 ### Root device
 

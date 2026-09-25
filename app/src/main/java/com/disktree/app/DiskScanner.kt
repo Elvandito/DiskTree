@@ -1,5 +1,6 @@
 package com.disktree.app
 
+import android.os.Build
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ internal data class RawEntry(
 internal class TreeBuilder(
     private val rootPath: String,
     private val sizeMode: SizeMode = SizeMode.LOGICAL,
+    private val hideAndroidAppDirs: Boolean = false,
 ) {
     private data class MutableNode(
         val path: String,
@@ -41,6 +43,7 @@ internal class TreeBuilder(
         val rawSize = line.substring(0, delimiter).toLongOrNull()?.coerceAtLeast(0L) ?: return null
         val path = normalize(line.substring(delimiter + 1).trimStart(' '))
         if (!isWithinRoot(path)) return null
+        if (hideAndroidAppDirs && isAndroidAppDir(path)) return null
 
         val reportedSizeIncludesChildren = sizeMode == SizeMode.ALLOCATED
         val sizeBytes = if (reportedSizeIncludesChildren) rawSize * 1024L else rawSize
@@ -159,12 +162,14 @@ internal class DiskScanner {
         onProgress: (ScanProgress) -> Unit,
     ): ScanResult = withContext(Dispatchers.IO) {
         val rootPath = if (useRoot) "/data" else sharedStoragePath
-        val tree = TreeBuilder(rootPath, sizeMode)
+        val hideAndroidAppDirs = !useRoot && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        val tree = TreeBuilder(rootPath, sizeMode, hideAndroidAppDirs)
         val process = startProcess(useRoot, sharedStoragePath, sizeMode)
         activeProcess = process
 
         var entryCount = 0L
         var scannedBytes = 0L
+        var expectedProtection = false
         val errors = mutableListOf<String>()
 
         try {
@@ -176,7 +181,11 @@ internal class DiskScanner {
 
                     val entry = tree.accept(line)
                     if (entry == null) {
-                        if (errors.size < 4) errors += line.take(180)
+                        if (isExpectedProtectionMessage(line)) {
+                            expectedProtection = true
+                        } else if (errors.size < 4) {
+                            errors += line.take(180)
+                        }
                         continue
                     }
 
@@ -207,8 +216,8 @@ internal class DiskScanner {
             onProgress(ScanProgress(rootPath, entryCount, scannedBytes))
             ScanResult(
                 root = rootNode,
-                warning = if (exitCode != 0 || errors.isNotEmpty()) {
-                    "Some protected paths were skipped."
+                warning = if (shouldWarnAboutSkippedPaths(exitCode, errors.size, expectedProtection)) {
+                    "Some paths could not be read."
                 } else {
                     null
                 },
@@ -272,6 +281,21 @@ internal class DiskScanner {
         }
     }
 }
+
+internal fun isAndroidAppDir(path: String): Boolean {
+    return path.endsWith("/Android/data") || path.contains("/Android/data/") ||
+        path.endsWith("/Android/obb") || path.contains("/Android/obb/")
+}
+
+internal fun isExpectedProtectionMessage(line: String): Boolean {
+    return line.contains("/Android/data") || line.contains("/Android/obb")
+}
+
+internal fun shouldWarnAboutSkippedPaths(
+    exitCode: Int,
+    unexpectedErrorCount: Int,
+    expectedProtectionError: Boolean,
+): Boolean = unexpectedErrorCount > 0 || (exitCode != 0 && !expectedProtectionError)
 
 internal fun isRootIdOutput(output: String): Boolean = output.trim().toLongOrNull() == 0L
 

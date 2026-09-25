@@ -1,12 +1,11 @@
 package com.disktree.app
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,9 +15,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Description
@@ -31,8 +33,8 @@ import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -47,18 +49,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
 import java.util.Locale
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+private val MeterTextStyle = TextStyle(
+    fontFamily = FontFamily.Monospace,
+    fontFeatureSettings = "tnum",
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiskTreeScreen(
     state: DiskTreeUiState,
@@ -118,8 +135,11 @@ fun DiskTreeScreen(
                     enabled = !scanning,
                     onSelect = onSelectSizeMode,
                 )
-                StorageSummary(state.capacity)
-
+                StorageSummary(
+                    capacity = state.capacity,
+                    label = if (state.scope == ScanScope.ROOT_DEVICE) "/data" else "Shared storage",
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 when {
                     scanning -> ScanningState(Modifier.weight(1f), state.progress, state.scope)
                     state.scope == ScanScope.ROOT_DEVICE && state.rootAccess != RootAccess.AVAILABLE -> RootAccessState(
@@ -130,9 +150,7 @@ fun DiskTreeScreen(
                     state.phase is ScanPhase.Failed -> ErrorState(
                         modifier = Modifier.weight(1f),
                         message = (state.phase as ScanPhase.Failed).message,
-                        onUseSharedStorage = {
-                            onSelectScope(ScanScope.SHARED_STORAGE)
-                        },
+                        onUseSharedStorage = { onSelectScope(ScanScope.SHARED_STORAGE) },
                         showSharedStorageAction = state.scope == ScanScope.ROOT_DEVICE,
                     )
 
@@ -153,126 +171,200 @@ fun DiskTreeScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+private data class SegmentOption<T>(
+    val value: T,
+    val label: String,
+    val icon: ImageVector,
+)
+
 @Composable
 private fun ScopeSelector(
     selected: ScanScope,
     enabled: Boolean,
     onSelect: (ScanScope) -> Unit,
 ) {
-    FlowRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        FilterChip(
-            selected = selected == ScanScope.SHARED_STORAGE,
-            onClick = { onSelect(ScanScope.SHARED_STORAGE) },
-            enabled = enabled,
-            label = { Text("Shared storage") },
-            leadingIcon = { Icon(Icons.Outlined.Storage, contentDescription = null) },
-        )
-        FilterChip(
-            selected = selected == ScanScope.ROOT_DEVICE,
-            onClick = { onSelect(ScanScope.ROOT_DEVICE) },
-            enabled = enabled,
-            label = { Text("Root device") },
-            leadingIcon = { Icon(Icons.Outlined.Shield, contentDescription = null) },
-        )
-    }
+    SegmentedSelector(
+        label = "Scan scope",
+        options = listOf(
+            SegmentOption(ScanScope.SHARED_STORAGE, "Shared storage", Icons.Outlined.Storage),
+            SegmentOption(ScanScope.ROOT_DEVICE, "Root device", Icons.Outlined.Shield),
+        ),
+        selected = selected,
+        enabled = enabled,
+        onSelect = onSelect,
+    )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SizeModeSelector(
     selected: SizeMode,
     enabled: Boolean,
     onSelect: (SizeMode) -> Unit,
 ) {
+    SegmentedSelector(
+        label = "Size view",
+        supporting = "File size is logical bytes. Disk usage is allocated blocks.",
+        options = listOf(
+            SegmentOption(SizeMode.LOGICAL, "File size", Icons.Outlined.Description),
+            SegmentOption(SizeMode.ALLOCATED, "Disk usage", Icons.Outlined.Storage),
+        ),
+        selected = selected,
+        enabled = enabled,
+        onSelect = onSelect,
+    )
+}
+
+@Composable
+private fun <T> SegmentedSelector(
+    label: String,
+    options: List<SegmentOption<T>>,
+    selected: T,
+    enabled: Boolean,
+    onSelect: (T) -> Unit,
+    supporting: String? = null,
+) {
+    val shape = MaterialTheme.shapes.medium
+    val idleColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.5f)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp),
     ) {
-        Text("Size view", style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.height(6.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            FilterChip(
-                selected = selected == SizeMode.LOGICAL,
-                onClick = { onSelect(SizeMode.LOGICAL) },
-                enabled = enabled,
-                label = { Text("File size") },
-                leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null) },
-            )
-            FilterChip(
-                selected = selected == SizeMode.ALLOCATED,
-                onClick = { onSelect(SizeMode.ALLOCATED) },
-                enabled = enabled,
-                label = { Text("Disk usage") },
-                leadingIcon = { Icon(Icons.Outlined.Storage, contentDescription = null) },
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "File size matches file managers. Disk usage shows allocated blocks.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun StorageSummary(capacity: StorageCapacity?) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            if (capacity == null || capacity.totalBytes <= 0L) {
-                Text("Storage volume unavailable", style = MaterialTheme.typography.titleMedium)
-            } else {
-                val usedFraction = capacity.usedBytes.toFloat() / capacity.totalBytes.toFloat()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    StorageStat("Used", formatBytes(capacity.usedBytes))
-                    StorageStat("Free", formatBytes(capacity.freeBytes))
-                }
-                Spacer(Modifier.height(12.dp))
-                LinearProgressIndicator(
-                    progress = { usedFraction.coerceIn(0f, 1f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StorageStat(label: String, value: String) {
-    Column {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
+        ) {
+            options.forEachIndexed { index, option ->
+                val active = option.value == selected
+                if (index > 0) {
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .height(24.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    )
+                }
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RectangleShape,
+                    color = if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else idleColor,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .selectable(
+                                selected = active,
+                                enabled = enabled,
+                                role = Role.RadioButton,
+                                onClick = { onSelect(option.value) },
+                            )
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = option.icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = option.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        if (supporting != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = supporting,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StorageSummary(capacity: StorageCapacity?, label: String) {
+    val total = capacity?.totalBytes ?: 0L
+    if (capacity == null || total <= 0L) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Storage volume unavailable",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        return
+    }
+
+    val used = (capacity.usedBytes.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Column {
+                Text(
+                    text = "Used",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(2.dp))
+                MeterText(text = formatBytes(capacity.usedBytes), style = MaterialTheme.typography.titleLarge)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "Free",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(2.dp))
+                MeterText(text = formatBytes(capacity.freeBytes), style = MaterialTheme.typography.titleLarge)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        LinearProgressIndicator(
+            progress = { used },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Spacer(Modifier.height(6.dp))
         Text(
-            text = value,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
+            text = "$label · ${formatPercent(used)} of ${formatBytes(total)} total",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -281,6 +373,7 @@ private fun StorageStat(label: String, value: String) {
 private fun IdleState(modifier: Modifier, scope: ScanScope) {
     StatePanel(
         modifier = modifier,
+        icon = Icons.Outlined.Storage,
         title = "No scan yet",
         message = if (scope == ScanScope.ROOT_DEVICE) {
             "DiskTree will ask your root manager for permission, then scan the device data partition."
@@ -294,8 +387,9 @@ private fun IdleState(modifier: Modifier, scope: ScanScope) {
 private fun AccessState(modifier: Modifier) {
     StatePanel(
         modifier = modifier,
+        icon = Icons.Outlined.LockOpen,
         title = "File access needed",
-        message = "Grant all files access to analyze shared storage. Android 11 and newer may hide some app folders from standard access.",
+        message = "Grant all files access to analyze shared storage. Android 11 and newer hide app folders from standard access.",
     )
 }
 
@@ -313,11 +407,44 @@ private fun RootAccessState(modifier: Modifier, access: RootAccess) {
         RootAccess.UNKNOWN -> "Check root access before scanning the device data partition."
         RootAccess.AVAILABLE -> "Root access is available."
     }
-    StatePanel(modifier = modifier, title = title, message = message)
+    Box(
+        modifier = modifier.padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.widthIn(max = 420.dp),
+        ) {
+            if (access == RootAccess.CHECKING) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                IconBadge(Icons.Outlined.Shield)
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
 }
 
 @Composable
 private fun ScanningState(modifier: Modifier, progress: ScanProgress, scope: ScanScope) {
+    val rootScan = scope == ScanScope.ROOT_DEVICE
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -325,29 +452,56 @@ private fun ScanningState(modifier: Modifier, progress: ScanProgress, scope: Sca
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = if (scope == ScanScope.ROOT_DEVICE) "Scanning device data" else "Scanning shared storage",
+            text = if (rootScan) "Scanning device data" else "Scanning shared storage",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
         )
-        Spacer(Modifier.height(12.dp))
-        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
-            text = if (progress.scannedBytes > 0L) {
-                "${formatInteger(progress.entryCount)} entries, ${formatBytes(progress.scannedBytes)}"
-            } else {
-                "${formatInteger(progress.entryCount)} entries"
-            },
-            style = MaterialTheme.typography.titleMedium,
+            text = if (rootScan) "/data" else "External storage",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(Modifier.height(20.dp))
+        LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Spacer(Modifier.height(20.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+            StatCell(label = "Entries", value = formatInteger(progress.entryCount))
+            if (progress.scannedBytes > 0L) {
+                StatCell(label = "Scanned", value = formatBytes(progress.scannedBytes))
+            }
+        }
         if (progress.currentPath.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(20.dp))
             Text(
-                text = progress.currentPath,
-                style = MaterialTheme.typography.bodySmall,
+                text = "Current path",
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(4.dp))
+            MeterText(
+                text = progress.currentPath,
+                style = MaterialTheme.typography.bodySmall,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
+    }
+}
+
+@Composable
+private fun StatCell(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(2.dp))
+        MeterText(text = value, style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -365,12 +519,20 @@ private fun ErrorState(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            imageVector = Icons.Outlined.ErrorOutline,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(40.dp),
-        )
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.size(52.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Outlined.ErrorOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
         Spacer(Modifier.height(16.dp))
         Text(
             text = "Scan failed",
@@ -381,7 +543,7 @@ private fun ErrorState(
         Spacer(Modifier.height(8.dp))
         Text(
             text = message,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
@@ -400,23 +562,50 @@ private fun ErrorState(
 @Composable
 private fun StatePanel(
     modifier: Modifier,
+    icon: ImageVector,
     title: String,
     message: String,
 ) {
-    Box(modifier = modifier.padding(24.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(
+        modifier = modifier.padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.widthIn(max = 420.dp),
+        ) {
+            IconBadge(icon)
+            Spacer(Modifier.height(16.dp))
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = message,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun IconBadge(icon: ImageVector) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.size(52.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
             )
         }
     }
@@ -447,18 +636,25 @@ private fun ResultTree(
                     text = if (sizeMode == SizeMode.LOGICAL) "Largest by file size" else "Largest by disk usage",
                     style = MaterialTheme.typography.titleMedium,
                 )
-                Text(
+                Spacer(Modifier.height(2.dp))
+                MeterText(
                     text = root.path,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = formatBytes(root.sizeBytes),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Spacer(Modifier.width(12.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                MeterText(text = formatBytes(root.sizeBytes), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "total",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         if (warning != null) {
             Row(
                 modifier = Modifier
@@ -471,18 +667,19 @@ private fun ResultTree(
                     imageVector = Icons.Outlined.Info,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
                 )
-                Spacer(Modifier.size(10.dp))
+                Spacer(Modifier.width(10.dp))
                 Text(
                     text = warning,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
         LazyColumn(
             modifier = Modifier.weight(1f),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+            contentPadding = PaddingValues(bottom = 12.dp),
         ) {
             items(visibleNodes, key = { it.node.path }) { visible ->
                 StorageTreeRow(
@@ -504,35 +701,68 @@ private fun StorageTreeRow(
     onClick: () -> Unit,
 ) {
     val node = visible.node
-    val containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val guideColor = MaterialTheme.colorScheme.outlineVariant
+    val accent = MaterialTheme.colorScheme.primary
+    val contentColor = MaterialTheme.colorScheme.onSurface
+    val mutedColor = MaterialTheme.colorScheme.onSurfaceVariant
     val description = buildString {
         append(node.name)
         append(", ")
         append(if (node.isDirectory) "folder" else "file")
         append(", ")
         append(formatBytes(node.sizeBytes))
+        if (node.isDirectory && node.children.isNotEmpty()) {
+            append(", ${itemLabel(node.children.size)}")
+        }
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(containerColor)
-            .clickable(role = Role.Button, onClick = onClick)
+            .drawBehind {
+                if (selected) {
+                    drawRect(accent, size = Size(3.dp.toPx(), this.size.height))
+                }
+                val stroke = 1.dp.toPx()
+                val step = 16.dp.toPx()
+                val first = 12.dp.toPx() + 11.dp.toPx()
+                repeat(visible.depth.coerceAtMost(5)) { level ->
+                    val x = first + level * step
+                    drawLine(
+                        color = guideColor,
+                        start = Offset(x, 0f),
+                        end = Offset(x, this.size.height),
+                        strokeWidth = stroke,
+                    )
+                }
+            }
+            .background(
+                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent,
+            )
+            .selectable(
+                selected = selected,
+                role = Role.Button,
+                onClick = onClick,
+            )
             .semantics(mergeDescendants = true) {
                 contentDescription = description
                 if (node.isDirectory) {
                     stateDescription = if (expanded) "Expanded" else "Collapsed"
                 }
-            }
-            .padding(
-                start = 12.dp + (visible.depth.coerceAtMost(5) * 14).dp,
-                end = 16.dp,
-                top = 10.dp,
-                bottom = 10.dp,
-            ),
+            },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(
+                    start = 12.dp + (visible.depth.coerceAtMost(5) * 16).dp,
+                    end = 16.dp,
+                    top = 8.dp,
+                    bottom = 8.dp,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(
                 imageVector = when {
                     !node.isDirectory -> Icons.Outlined.Description
@@ -540,37 +770,45 @@ private fun StorageTreeRow(
                     else -> Icons.Outlined.ChevronRight
                 },
                 contentDescription = null,
-                tint = contentColor,
-                modifier = Modifier.size(24.dp),
+                tint = if (selected) accent else mutedColor,
+                modifier = Modifier.size(22.dp),
             )
-            Spacer(Modifier.size(10.dp))
-            Text(
-                text = node.name,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
-                color = contentColor,
-                fontWeight = if (visible.depth == 0) FontWeight.SemiBold else FontWeight.Normal,
-            )
-            Spacer(Modifier.size(12.dp))
-            Text(
-                text = formatBytes(node.sizeBytes),
-                modifier = Modifier.widthIn(max = 150.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = contentColor,
-                textAlign = TextAlign.End,
-            )
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = node.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = contentColor,
+                    fontWeight = if (visible.depth == 0) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (node.isDirectory && node.children.isNotEmpty()) {
+                    Spacer(Modifier.height(1.dp))
+                    Text(
+                        text = itemLabel(node.children.size),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = mutedColor,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                MeterText(text = formatBytes(node.sizeBytes), style = MaterialTheme.typography.labelLarge)
+                if (visible.depth > 0 && visible.share > 0f) {
+                    Spacer(Modifier.height(1.dp))
+                    Text(
+                        text = formatPercent(visible.share),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = mutedColor,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        LinearProgressIndicator(
-            progress = { visible.share.coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
-        )
+        HorizontalDivider(color = guideColor.copy(alpha = 0.6f))
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 }
 
 @Composable
@@ -586,6 +824,11 @@ private fun ScanActionBar(
     onCheckRootAccess: () -> Unit,
 ) {
     val scanning = phase == ScanPhase.Scanning
+    val needsPermission = scope == ScanScope.SHARED_STORAGE && !hasStorageAccess
+    val needsRootCheck = scope == ScanScope.ROOT_DEVICE && rootAccess != RootAccess.AVAILABLE
+    val checkingRoot = scope == ScanScope.ROOT_DEVICE && rootAccess == RootAccess.CHECKING
+    val complete = phase == ScanPhase.Complete
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 3.dp,
@@ -604,49 +847,88 @@ private fun ScanActionBar(
                         .heightIn(min = 52.dp),
                 ) {
                     Icon(Icons.Outlined.StopCircle, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text("Cancel scan")
                 }
-            } else {
-                val needsPermission = scope == ScanScope.SHARED_STORAGE && !hasStorageAccess
-                val needsRootCheck = scope == ScanScope.ROOT_DEVICE && rootAccess != RootAccess.AVAILABLE
-                val checkingRoot = scope == ScanScope.ROOT_DEVICE && rootAccess == RootAccess.CHECKING
-                val complete = phase == ScanPhase.Complete
-                val label = when {
-                    checkingRoot -> "Checking root access"
-                    needsRootCheck -> "Check root access"
-                    needsPermission -> "Grant file access"
-                    complete -> "Scan again"
-                    scope == ScanScope.ROOT_DEVICE -> "Scan with root"
-                    sizeMode == SizeMode.LOGICAL -> "Scan file sizes"
-                    else -> "Scan disk usage"
+                return@Column
+            }
+
+            val context = when {
+                needsRootCheck -> "Root access is required before scanning /data"
+                needsPermission -> "Storage permission is required before scanning shared storage"
+                else -> {
+                    val target = if (scope == ScanScope.ROOT_DEVICE) "/data" else "Shared storage"
+                    val measurement = if (sizeMode == SizeMode.LOGICAL) "File size" else "Disk usage"
+                    "$target · $measurement"
                 }
-                val icon = when {
-                    needsRootCheck -> Icons.Outlined.Shield
-                    needsPermission -> Icons.Outlined.LockOpen
-                    complete -> Icons.Outlined.Refresh
-                    scope == ScanScope.ROOT_DEVICE -> Icons.Outlined.Shield
-                    else -> Icons.Outlined.Storage
-                }
-                val action = when {
-                    needsRootCheck -> onCheckRootAccess
-                    needsPermission -> onRequestStorageAccess
-                    else -> onScan
-                }
-                Button(
-                    onClick = action,
-                    enabled = !checkingRoot,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 52.dp),
-                ) {
-                    Icon(icon, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text(label)
-                }
+            }
+            val label = when {
+                checkingRoot -> "Checking root access"
+                needsRootCheck -> "Check root access"
+                needsPermission -> "Grant file access"
+                complete -> "Scan again"
+                scope == ScanScope.ROOT_DEVICE -> "Scan with root"
+                sizeMode == SizeMode.LOGICAL -> "Scan file sizes"
+                else -> "Scan disk usage"
+            }
+            val icon = when {
+                needsRootCheck -> Icons.Outlined.Shield
+                needsPermission -> Icons.Outlined.LockOpen
+                complete -> Icons.Outlined.Refresh
+                scope == ScanScope.ROOT_DEVICE -> Icons.Outlined.Shield
+                else -> Icons.Outlined.Storage
+            }
+            val action = when {
+                needsRootCheck -> onCheckRootAccess
+                needsPermission -> onRequestStorageAccess
+                else -> onScan
+            }
+
+            Text(
+                text = context,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = action,
+                enabled = !checkingRoot,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp),
+            ) {
+                Icon(icon, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(label)
             }
         }
     }
+}
+
+@Composable
+private fun MeterText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    maxLines: Int = 1,
+    overflow: TextOverflow = TextOverflow.Clip,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = style.merge(MeterTextStyle),
+        color = color,
+        maxLines = maxLines,
+        overflow = overflow,
+    )
+}
+
+private fun itemLabel(count: Int): String = if (count == 1) "1 item" else "$count items"
+
+private fun formatPercent(share: Float): String {
+    val percent = (share * 100f).roundToInt()
+    return if (percent >= 1) "$percent%" else "<1%"
 }
 
 private fun formatBytes(bytes: Long): String {

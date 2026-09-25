@@ -97,4 +97,53 @@ class DiskTreeTest {
         assertEquals(2, appExpanded[2].depth)
         assertEquals(500f / 750f, appExpanded[2].share, 0.001f)
     }
+
+    @Test
+    fun hidesAndroidAppDirectoriesWhenPlatformBlocksThem() {
+        val builder = TreeBuilder("/storage/emulated/0", SizeMode.LOGICAL, hideAndroidAppDirs = true)
+
+        builder.accept("4096\t/storage/emulated/0")
+        builder.accept("4096\t/storage/emulated/0/Android")
+        builder.accept("4096\t/storage/emulated/0/Android/data")
+        builder.accept("100\t/storage/emulated/0/Android/data/other.app")
+        builder.accept("4096\t/storage/emulated/0/Android/obb")
+        builder.accept("9000\t/storage/emulated/0/Download/app.bin")
+
+        val root = builder.build()
+
+        assertEquals(listOf("Download", "Android"), root.children.map { it.name })
+        assertEquals(9_000L, root.children[0].sizeBytes)
+        assertEquals(4_096L, root.children[1].sizeBytes)
+        assertTrue(root.children[1].children.isEmpty())
+    }
+
+    @Test
+    fun keepsAndroidAppDirectoriesWhenPlatformAllowsThem() {
+        val builder = TreeBuilder("/storage/emulated/0")
+
+        builder.accept("4096\t/storage/emulated/0")
+        builder.accept("4096\t/storage/emulated/0/Android")
+        builder.accept("100\t/storage/emulated/0/Android/data/other.app")
+
+        val root = builder.build()
+
+        assertEquals(listOf("Android"), root.children.map { it.name })
+        assertEquals(4_196L, root.children.single().sizeBytes)
+        assertEquals("other.app", root.children.single().children.single().name)
+    }
+
+    @Test
+    fun classifiesExpectedProtectionMessages() {
+        assertTrue(isExpectedProtectionMessage("find: /storage/emulated/0/Android/data: Permission denied"))
+        assertTrue(isExpectedProtectionMessage("du: cannot read directory '/storage/emulated/0/Android/obb/other.app': Permission denied"))
+        assertFalse(isExpectedProtectionMessage("find: /storage/emulated/0/.nomedia: Permission denied"))
+    }
+
+    @Test
+    fun warnsOnlyForUnexpectedSkippedPaths() {
+        assertFalse(shouldWarnAboutSkippedPaths(exitCode = 1, unexpectedErrorCount = 0, expectedProtectionError = true))
+        assertTrue(shouldWarnAboutSkippedPaths(exitCode = 1, unexpectedErrorCount = 0, expectedProtectionError = false))
+        assertTrue(shouldWarnAboutSkippedPaths(exitCode = 0, unexpectedErrorCount = 1, expectedProtectionError = true))
+        assertFalse(shouldWarnAboutSkippedPaths(exitCode = 0, unexpectedErrorCount = 0, expectedProtectionError = false))
+    }
 }
