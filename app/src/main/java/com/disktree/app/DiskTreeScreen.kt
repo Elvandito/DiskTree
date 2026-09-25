@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -112,9 +111,10 @@ fun DiskTreeScreen(
                 StorageSummary(state.capacity)
 
                 when {
-                    scanning -> ScanningState(state.progress, state.scope)
-                    !hasStorageAccess && state.scope == ScanScope.SHARED_STORAGE -> AccessState()
+                    scanning -> ScanningState(Modifier.weight(1f), state.progress, state.scope)
+                    !hasStorageAccess && state.scope == ScanScope.SHARED_STORAGE -> AccessState(Modifier.weight(1f))
                     state.phase is ScanPhase.Failed -> ErrorState(
+                        modifier = Modifier.weight(1f),
                         message = (state.phase as ScanPhase.Failed).message,
                         onUseSharedStorage = {
                             onSelectScope(ScanScope.SHARED_STORAGE)
@@ -123,6 +123,7 @@ fun DiskTreeScreen(
                     )
 
                     state.phase == ScanPhase.Complete && state.root != null -> ResultTree(
+                        modifier = Modifier.weight(1f),
                         root = state.root,
                         expandedPaths = state.expandedPaths,
                         selectedPath = state.selectedPath,
@@ -130,7 +131,7 @@ fun DiskTreeScreen(
                         onSelectNode = onSelectNode,
                     )
 
-                    else -> IdleState(state.scope)
+                    else -> IdleState(Modifier.weight(1f), state.scope)
                 }
             }
         }
@@ -220,9 +221,9 @@ private fun StorageStat(label: String, value: String) {
 }
 
 @Composable
-private fun IdleState(scope: ScanScope) {
+private fun IdleState(modifier: Modifier, scope: ScanScope) {
     StatePanel(
-        modifier = Modifier.weight(1f),
+        modifier = modifier,
         title = "No scan yet",
         message = if (scope == ScanScope.ROOT_DEVICE) {
             "DiskTree will ask your root manager for permission, then scan the device data partition."
@@ -233,20 +234,19 @@ private fun IdleState(scope: ScanScope) {
 }
 
 @Composable
-private fun AccessState() {
+private fun AccessState(modifier: Modifier) {
     StatePanel(
-        modifier = Modifier.weight(1f),
+        modifier = modifier,
         title = "File access needed",
         message = "Grant all files access to analyze shared storage. Android 11 and newer may hide some app folders from standard access.",
     )
 }
 
 @Composable
-private fun ScanningState(progress: ScanProgress, scope: ScanScope) {
+private fun ScanningState(modifier: Modifier, progress: ScanProgress, scope: ScanScope) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .weight(1f)
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
@@ -275,14 +275,14 @@ private fun ScanningState(progress: ScanProgress, scope: ScanScope) {
 
 @Composable
 private fun ErrorState(
+    modifier: Modifier,
     message: String,
     onUseSharedStorage: () -> Unit,
     showSharedStorageAction: Boolean,
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .weight(1f)
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -346,6 +346,7 @@ private fun StatePanel(
 
 @Composable
 private fun ResultTree(
+    modifier: Modifier,
     root: ScanNode,
     expandedPaths: Set<String>,
     selectedPath: String?,
@@ -354,7 +355,7 @@ private fun ResultTree(
 ) {
     val visibleNodes = remember(root, expandedPaths) { flattenTree(root, expandedPaths) }
 
-    Column(modifier = Modifier.weight(1f)) {
+    Column(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
